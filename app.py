@@ -1294,8 +1294,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
         opacity=0.8
     )])
     benif_bar.update_layout(
-        title=dict(text="Beneficiary Distribution", font=dict(size=14, color="#64748b", family="Inter"), x=0.5, y=0.95),
-        margin=dict(t=50, b=100, l=40, r=20),
+        margin=dict(t=20, b=100, l=40, r=20),
         xaxis=dict(tickangle=-45, automargin=True, title=None, showgrid=False, tickfont=dict(size=9)),
         yaxis=dict(title=None, automargin=True, showgrid=True, gridcolor="#f1f5f9"),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
@@ -1313,8 +1312,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
         hoverinfo='label+value'
     )])
     anemia_pie.update_layout(
-        title=dict(text="Anemia Case Distribution", font=dict(size=14, color="#64748b", family="Inter"), x=0.5, y=0.95),
-        margin=dict(t=40, b=40, l=20, r=20),
+        margin=dict(t=20, b=40, l=20, r=20),
         legend=dict(
             orientation="h", 
             yanchor="bottom", 
@@ -1357,8 +1355,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
             )
     anemia_area_bar.update_layout(
         barmode="stack", 
-        title=dict(text="Anemia Status Comparison by Area Code", font=dict(size=16, color="#1e293b", family="Inter"), x=0.01),
-        margin=dict(t=80, b=80, l=40, r=20),
+        margin=dict(t=30, b=80, l=40, r=20),
         xaxis=dict(title="Area Code", automargin=True, showgrid=False, type='category'),
         yaxis=dict(title="Count", automargin=True, showgrid=True, gridcolor="#f1f5f9"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
