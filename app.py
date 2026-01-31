@@ -365,7 +365,7 @@ DATA_SOURCE_URL = "https://script.google.com/macros/s/AKfycbzazlpEvo3qo2pVhp0fvc
 BENEFICIARY_MAP = {
     2: "Pregnant Women",
     3: "Children 5-59 Months",
-    4: "Children Aged 5-9 Years  (60 Months)",
+    4: "Children Aged 5-9 Years",
     5: "Adolescent Girls 10-19 Years",
     6: "Adolescent Boys 10-19 Years",
     7: "Women Of Reproductive Age"
@@ -485,8 +485,8 @@ def classify_anemia_who(hgb, age, gender, beneficiary):
         else:
             return "severe"
     
-    # Children Aged 5-9 Years (60 Months)
-    elif "5-9 years" in beneficiary_str or "60 months" in beneficiary_str:
+    # Children Aged 5-9 Years
+    elif "5-9 years" in beneficiary_str:
         if hgb >= 11.5:
             return "normal"
         elif hgb >= 11.0:
@@ -1438,3 +1438,4 @@ def export_data(n_excel, n_csv, stored_dict, psu, area, benif, anemia):
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8050)
+
