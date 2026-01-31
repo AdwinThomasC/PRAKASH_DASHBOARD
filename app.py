@@ -334,6 +334,29 @@ body {
 }
 """
 
+app.index_string = f'''
+<!DOCTYPE html>
+<html>
+    <head>
+        {{%metas%}}
+        <title>Prakash Dashboard</title>
+        {{%favicon%}}
+        {{%css%}}
+        <style>
+            {CSS_STYLES}
+        </style>
+    </head>
+    <body>
+        {{%app_entry%}}
+        <footer>
+            {{%config%}}
+            {{%scripts%}}
+            {{%renderer%}}
+        </footer>
+    </body>
+</html>
+'''
+
 # =========================
 # LOAD DATA (URL or CSV)
 # =========================
@@ -577,8 +600,8 @@ def load_data():
     is_error = False
     try:
         import requests
-        # Increased timeout slightly for reliability on slower connections
-        r = requests.get(DATA_SOURCE_URL, timeout=10)
+        # Increased timeout to 20s to prevent 'Server did not respond' errors on slower links
+        r = requests.get(DATA_SOURCE_URL, timeout=20)
         r.raise_for_status()
         
         try:
@@ -865,7 +888,7 @@ CARD_STYLE = {"height": "350px"}
 MAP_CARD_STYLE = {"height": "645px"}
 
 app.layout = html.Div([
-    dcc.Interval(id="interval", interval=30_000, n_intervals=0),
+    dcc.Interval(id="interval", interval=60_000, n_intervals=0),
     dcc.Store(id="stored-data"),
     dcc.Download(id="download-data"),
     
@@ -885,22 +908,22 @@ app.layout = html.Div([
         html.Div([
             html.Div([
                 html.Label("Area Selection", className="sidebar-label"),
-                dcc.Dropdown(id="area-dropdown", options=[], multi=True, placeholder="All Areas"),
+                dcc.Dropdown(id="area-dropdown", options=[], multi=True, value=[], placeholder="All Areas"),
             ], className="filter-group"),
             
             html.Div([
                 html.Label("PSU Selection", className="sidebar-label"),
-                dcc.Dropdown(id="psu-dropdown", options=[], multi=True, placeholder="All PSUs"),
+                dcc.Dropdown(id="psu-dropdown", options=[], multi=True, value=[], placeholder="All PSUs"),
             ], className="filter-group"),
             
             html.Div([
                 html.Label("Beneficiary Type", className="sidebar-label"),
-                dcc.Dropdown(id="benificiery-dropdown", options=[], multi=True, placeholder="All Beneficiaries"),
+                dcc.Dropdown(id="benificiery-dropdown", options=[], multi=True, value=[], placeholder="All Beneficiaries"),
             ], className="filter-group"),
             
             html.Div([
                 html.Label("Anemia Status", className="sidebar-label"),
-                dcc.Dropdown(id="anemia-dropdown", options=[{"label": x.capitalize(), "value": x} for x in anemia_list], multi=True, placeholder="All Categories"),
+                dcc.Dropdown(id="anemia-dropdown", options=[{"label": x.capitalize(), "value": x} for x in anemia_list], multi=True, value=[], placeholder="All Categories"),
             ], className="filter-group"),
 
             dbc.Button([html.I(className="fas fa-broom me-2"), "Clear All Filters"], 
@@ -1078,7 +1101,7 @@ def refresh_data(_):
 def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear):
     if not stored_dict or "records" not in stored_dict:
         # Return 22 elements to match the number of outputs
-        return [0]*7 + [go.Figure()]*4 + [[], [], [], [], [], [], None, None, None, None, []]
+        return [0]*7 + [go.Figure()]*4 + [[], [], [], [], [], [], [], [], [], [], []]
     
     records = stored_dict["records"]
     status_msg = stored_dict["status"]
@@ -1087,7 +1110,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
 
     if not records and is_error:
         # Return 22 elements
-        return [0]*7 + [go.Figure()]*4 + [[], [], [], [], [], [], None, None, None, None, []]
+        return [0]*7 + [go.Figure()]*4 + [[], [], [], [], [], [], [], [], [], [], []]
 
     df_full = pd.DataFrame(records)
     
@@ -1096,7 +1119,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
 
     # Handle Chart Interactions (Cross-Filtering)
     if triggered_id == "btn-clear":
-        psu, area, benificiery, anemia = None, None, None, None
+        psu, area, benificiery, anemia = [], [], [], []
         
     elif triggered_id == "map" and map_click:
         village_clicked = map_click["points"][0].get("text")
