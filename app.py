@@ -8,6 +8,7 @@ import json
 import re
 import urllib.parse
 from datetime import datetime
+import threading
 
 
 # =========================
@@ -23,58 +24,133 @@ server = app.server
 # EMBEDDED CSS
 # =========================
 CSS_STYLES = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
 :root {
+    --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
     --primary-color: #4f46e5;
     --primary-hover: #4338ca;
-    --bg-light: #f1f5f9;
+    --teal-glow: #00f2fe;
+    --bg-light: #f8fafc;
     --sidebar-bg: #ffffff;
     --card-bg: #ffffff;
     --text-main: #0f172a;
     --text-muted: #64748b;
-    --border-color: #cbd5e1;
+    --border-color: #e2e8f0;
     --sidebar-width: 280px;
+    --top-bar-height: 90px;
     --sidebar-mobile-width: 100%;
-    --transition: all 0.2s ease-in-out;
+    --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body {
     margin: 0;
     padding: 0;
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-family);
     background-color: var(--bg-light);
     color: var(--text-main);
     overflow-x: hidden;
+}
+
+.top-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--top-bar-height);
+    background-color: #ffffff;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 40px;
+    z-index: 1200;
+    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.05);
+}
+
+.top-bar-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.glowing-badge {
+    background: #0d9488;
+    color: white !important;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 6px;
+    box-shadow: 0 0 15px rgba(13, 148, 136, 0.5);
+    text-shadow: 0 0 5px rgba(255, 255, 255, 0.4);
+    margin-left: 8px;
+    border: 1px solid #14b8a6;
+    letter-spacing: 0.02em;
 }
 
 /* Sidebar Styling */
 .sidebar {
     position: fixed;
     left: 0;
-    top: 0;
+    top: var(--top-bar-height);
     bottom: 0;
     width: var(--sidebar-width);
     background-color: var(--sidebar-bg);
     border-right: 1px solid var(--border-color);
-    z-index: 1000;
-    padding: 24px;
+    z-index: 1100;
+    padding: 32px 24px;
     display: flex;
     flex-direction: column;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.02);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.01);
     overflow-y: auto;
     overflow-x: visible !important;
     transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-logo {
-    font-weight: 700;
-    font-size: 1.75rem;
-    color: #000000;
     margin-bottom: 40px;
     display: flex;
     align-items: center;
     gap: 12px;
+    padding: 8px 0;
+}
+
+.logo-icon-container {
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, #4f46e5, #818cf8);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 1.4rem;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+}
+
+.logo-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.logo-text-top {
+    font-weight: 800;
+    font-size: 1.25rem;
+    color: #1e293b;
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+
+.logo-text-bottom {
+    font-weight: 600;
+    font-size: 0.7rem;
+    color: #6366f1;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
 }
 
 .sidebar-label {
@@ -98,8 +174,9 @@ body {
 /* Main Content Styling */
 .main-content {
     margin-left: var(--sidebar-width);
-    padding: 32px;
-    min-height: 100vh;
+    margin-top: var(--top-bar-height);
+    padding: 40px;
+    min-height: calc(100vh - var(--top-bar-height));
     transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -107,18 +184,80 @@ body {
     margin-left: 0;
 }
 
+.filter-section-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--primary-color);
+    display: inline-block;
+}
+
+.accordion-button:not(.collapsed) {
+    background-color: #f1f5f9 !important;
+    color: var(--primary-color) !important;
+    box-shadow: none !important;
+}
+
+.accordion-item {
+    border: none !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+}
+
+.accordion-button {
+    padding: 12px 0 !important;
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    color: var(--text-muted) !important;
+    box-shadow: none !important;
+}
+
+.accordion-body {
+    padding: 10px 0 20px 0 !important;
+}
+
 .top-header {
-    margin-bottom: 32px;
+    background: #f8fafc; /* Distinct light gray section */
+    padding: 32px;
+    border-radius: 20px;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 40px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
+}
+
+.title-container {
+    background: #ffffff;
+    padding: 16px 28px;
+    border-radius: 14px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.08); /* Projected effect */
+    display: inline-flex;
+    flex-direction: column;
 }
 
 .dashboard-title {
-    font-size: 1.75rem;
-    font-weight: 700;
+    font-size: 2.2rem;
+    font-weight: 800;
     margin: 0;
+    letter-spacing: -0.03em;
+    display: flex;
+    align-items: center;
     color: #0f172a;
+}
+
+.title-primary { color: #0f172a; }
+.title-separator { width: 1.5px; height: 30px; background-color: #cbd5e1; margin: 0 16px; }
+.title-secondary { font-weight: 400; font-size: 1.4rem; color: #64748b; letter-spacing: 0.05em; }
+
+.dashboard-footer {
+    padding: 20px 0;
+    margin-top: auto;
 }
 
 .status-badge {
@@ -190,7 +329,6 @@ body {
     color: var(--text-muted);
     margin-bottom: 0;
     font-weight: 500;
-    text-transform: uppercase;
     letter-spacing: 0.025em;
     line-height: 1.2;
 }
@@ -210,6 +348,13 @@ body {
     padding: 24px;
     margin-bottom: 24px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.graph-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+    border-color: var(--primary-color);
 }
 
 .graph-title {
@@ -253,13 +398,19 @@ body {
         transform: translateX(0);
     }
 
-    .main-content {
-        margin-left: 0 !important;
-        padding: 20px;
+    .top-bar {
+        display: none !important;
     }
 
     .mobile-nav {
         display: flex;
+        z-index: 1300; /* Higher than sidebar at 1100 and top-bar at 1200 */
+    }
+
+    .main-content {
+        margin-left: 0 !important;
+        margin-top: 0 !important; /* Mobile nav is sticky, not fixed covering space */
+        padding: 20px;
     }
 
     .top-header {
@@ -361,6 +512,9 @@ app.index_string = f'''
 # LOAD DATA (URL or CSV)
 # =========================
 DATA_SOURCE_URL = "https://script.google.com/macros/s/AKfycbzazlpEvo3qo2pVhp0fvcpUrlcyR9QRE2SYED5fu-5Og5oVBHZ-EIbaOR-VNCwEIC6JdQ/exec" 
+# Paste your deployed Google Apps Script Web App URL here to enable write-back
+EXCEL_WRITE_URL = "https://script.google.com/macros/s/AKfycbyfwRVnmXLB8qQt31kIGBmC1NxZ_atYNnM4h-M0sREFpIJJ5au8X9uu8Olwch80XRNpqQ/exec" 
+LAST_SYNC_CACHE = {} # To prevent redundant syncs {ID: row_signature}
 
 BENEFICIARY_MAP = {
     2: "Pregnant Women",
@@ -379,7 +533,6 @@ def parse_age(age_val):
     if isinstance(age_val, (int, float)):
         return age_val if age_val < 150 else None
         
-    # Handle datetime objects if pandas parsed them accidentally
     if hasattr(age_val, 'year') and hasattr(age_val, 'month'):
         # If it's a date, we probably can't infer age without a reference date, 
         # but let's assume it's not an age.
@@ -422,7 +575,7 @@ def parse_age(age_val):
             else:
                 years = val1
                 if len(nums) >= 2: months = float(nums[1][0])
-            
+    
     res = round(years + (months / 12), 2)
     return res if 0 < res < 150 else None
 
@@ -585,11 +738,77 @@ def classify_anemia_who(hgb, age, gender, beneficiary):
                     return "moderate"
                 else:
                     return "severe"
-
     # If we can't determine (missing/unclear beneficiary AND missing age), return incomplete
     return "incomplete"
 
+def sync_data_to_sheets(df):
+    """
+    Sends computed data (Anemia Status, Corrected Age) back to Google Sheets.
+    Only syncs rows that are new or have changed since the last session.
+    """
+    global LAST_SYNC_CACHE
+    if not EXCEL_WRITE_URL or "PASTE_SCRIPT_URL_HERE" in EXCEL_WRITE_URL:
+        return
+    
+    if df.empty:
+        return
 
+    sync_cols = [
+        "SL.NO", "ID", "enrollment_date", "Area COde", "PSU Name", 
+        "Name", "Gender", "Benificiery", "HGB", "anemia_category",
+        "Length", "Height", "Weight", "Age", "whatsapp"
+    ]
+    
+    # Identify which columns actually exist in the current dataframe
+    cols_to_use = [c for c in sync_cols if c in df.columns]
+    
+    # --- Row-Level Diffing ---
+    diff_rows = []
+    temp_cache = LAST_SYNC_CACHE.copy()
+    
+    for _, row in df.iterrows():
+        p_id = str(row.get("ID", "")).strip()
+        if not p_id or p_id.lower() == "nan": continue
+        
+        # Create a unique signature for this row based on its values
+        row_values = [str(row.get(c, "")).strip() for c in cols_to_use]
+        row_sig = "|".join(row_values)
+        
+        # If ID is new OR the data has changed, mark for sync
+        if p_id not in LAST_SYNC_CACHE or LAST_SYNC_CACHE[p_id] != row_sig:
+            diff_rows.append(row)
+            temp_cache[p_id] = row_sig
+            
+    if not diff_rows:
+        # print("DEBUG: No changes detected at row level. Skipping background sync.")
+        return
+    
+    print(f"DEBUG: Found {len(diff_rows)} new/updated records to sync to Sheets.")
+
+    try:
+        import requests
+        # Prepare data for sync
+        sync_df = pd.DataFrame(diff_rows)
+        
+        # Convert types for JSON compatibility
+        for col in sync_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(sync_df[col]):
+                sync_df[col] = sync_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Critical: Replace NaN with None so they become null in JSON
+        payload = sync_df.replace({pd.NA: None, float('nan'): None}).to_dict("records")
+        
+        # Syncing...
+        r = requests.post(EXCEL_WRITE_URL, json=payload, timeout=120, allow_redirects=True)
+        if r.status_code != 200:
+            print(f"DEBUG: Data sync failed with status {r.status_code}: {r.text[:200]}")
+        else:
+            print(f"DEBUG: Data sync successful: {r.json().get('message') if r.text.startswith('{') else 'OK'}")
+            # Update cache only after successful delivery
+            LAST_SYNC_CACHE = temp_cache
+    except Exception as e:
+        import traceback
+        print(f"DEBUG: Data sync exception trace: {traceback.format_exc()}")
 
 def load_data():
     """
@@ -627,7 +846,7 @@ def load_data():
             "Name", "Household Name", "Gender", "Benificiery", "DOB", "Age",
             "sample_status", "Sample Collected Date", "Collected By",
             "HGB", "anemia_category", "field_investigator", "Diet", "data_operator",
-            "Asha_Worker", "Aasha_Contact"
+            "Asha_Worker", "Aasha_Contact", "Length", "Height", "Weight"
         ]
         df = df[[c for c in required_cols if c in df.columns]]
 
@@ -638,6 +857,25 @@ def load_data():
         
         if "HGB" in df.columns:
             df["HGB"] = pd.to_numeric(df["HGB"], errors="coerce")
+
+        # Numeric conversion for anthropometric data
+        for col in ["Length", "Height", "Weight"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # Calculate BMI: Weight(kg) / [Height(m)]²
+        # Uses Height if available, otherwise Length
+        if "Weight" in df.columns:
+            h_col = "Height" if "Height" in df.columns else ("Length" if "Length" in df.columns else None)
+            if h_col:
+                # height in meters, ensure not zero
+                valid_h = (df[h_col] > 0)
+                df["BMI"] = None
+                df.loc[valid_h, "BMI"] = (df.loc[valid_h, "Weight"] / ((df.loc[valid_h, h_col] / 100.0) ** 2)).round(1)
+            else:
+                df["BMI"] = None
+        else:
+            df["BMI"] = None
         
         # Parse Age with special logic
         if "Age" in df.columns:
@@ -667,6 +905,13 @@ def load_data():
         
         if "Area COde" in df.columns:
             df["Area COde"] = df["Area COde"].astype(str).str.zfill(3)
+
+        if "PSU Name" in df.columns and "Area COde" in df.columns:
+            df["Location"] = df["PSU Name"].astype(str) + " (" + df["Area COde"].astype(str) + ")"
+        elif "PSU Name" in df.columns:
+            df["Location"] = df["PSU Name"].astype(str)
+        else:
+            df["Location"] = "Unknown"
 
         if "anemia_category" in df.columns:
             df["anemia_category"] = df["anemia_category"].astype(str).str.strip()
@@ -869,7 +1114,7 @@ def create_map(df):
                 marker=dict(size=14, color=cat["color"], opacity=0.9),
                 name=cat["name"],
                 text=d_cat["name"],
-                textfont=dict(size=10, color="#2c3e50", family="Arial"),
+                textfont=dict(size=10, color="#2c3e50", family="-apple-system, BlinkMacSystemFont, sans-serif"),
                 textposition="top center",
                 hovertemplate='<b>%{text}</b><br>Total Samples: %{customdata[0]}<br>Status: %{customdata[1]}<br><br><b>Beneficiary Breakdown:</b><br>%{customdata[2]}<extra></extra>',
                 customdata=d_cat[["count", "status", "breakdown"]].values
@@ -879,7 +1124,7 @@ def create_map(df):
         map_style="open-street-map", map_center={"lat": 15.6, "lon": 76.15},
         map_zoom=8.3, margin=dict(l=0, r=0, t=0, b=0),
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255, 255, 255, 0.7)"),
-        hoverlabel=dict(bgcolor="white", font_size=12, font_family="Inter")
+        hoverlabel=dict(bgcolor="white", font_size=12, font_family="-apple-system, BlinkMacSystemFont, sans-serif")
     )
     return fig
 
@@ -892,30 +1137,42 @@ app.layout = html.Div([
     dcc.Store(id="stored-data"),
     dcc.Download(id="download-data"),
     
+    # Fixed Top Bar
+    html.Nav([
+        html.Div([
+            html.Span("PRAKASH", style={"fontWeight": "800", "fontSize": "1.75rem", "marginRight": "10px"}),
+            html.Span("AMB 2.0 T³", className="glowing-badge", style={"fontSize": "0.9rem"})
+        ], className="top-bar-title"),
+        html.Img(src=app.get_asset_url("images.png"), style={"height": "70px", "mixBlendMode": "multiply"})
+    ], className="top-bar"),
+
     # Mobile Header (Only visible on mobile)
     html.Div([
         dbc.Button(html.I(className="fas fa-bars"), id="btn-toggle", className="toggle-button"),
-        html.Span("Prakash Dashboard", style={"fontWeight": "700", "fontSize": "1.2rem", "marginLeft": "15px"})
+        html.Div([
+            html.Span("PRAKASH", style={"fontWeight": "800", "fontSize": "1.1rem", "marginRight": "5px"}),
+            html.Span("AMB 2.0 T³", className="glowing-badge", style={"fontSize": "0.65rem", "padding": "1px 6px"})
+        ], style={"display": "flex", "alignItems": "center", "marginLeft": "10px", "flex": "1"}),
+        html.Img(src=app.get_asset_url("images.png"), style={"height": "45px", "mixBlendMode": "multiply", "marginLeft": "auto"})
     ], className="mobile-nav"),
+
     html.Div([
+        # Sidebar Header (Context Label)
         html.Div([
-            html.Span("Prakash Dashboard")
-        ], className="sidebar-logo"),
-        
-        html.P("Real-time Health Surveillance | Koppal, Karnataka", 
-               className="text-muted", style={"fontSize": "0.75rem", "marginBottom": "32px", "lineHeight": "1.4"}),
+            html.P("Real-time Anaemia Monitoring Dashboard", 
+                   style={"fontSize": "0.75rem", "fontWeight": "700", "color": "#000000", "margin": "0", "letterSpacing": "0.05em", "textTransform": "uppercase"}),
+            html.P("Koppal, Karnataka", 
+                   style={"fontSize": "0.7rem", "color": "#000000", "margin": "2px 0 0 0"})
+        ], style={"padding": "0 0 20px 0", "marginBottom": "10px", "borderBottom": "1px solid #f1f5f9"}),
         
         html.Div([
+            # Location Selection (Always Visible)
             html.Div([
-                html.Label("Area Selection", className="sidebar-label"),
-                dcc.Dropdown(id="area-dropdown", options=[], multi=True, value=[], placeholder="All Areas"),
+                html.Label("Location Selection", className="sidebar-label"),
+                dcc.Dropdown(id="location-dropdown", options=[], multi=True, value=[], placeholder="All Locations"),
             ], className="filter-group"),
             
-            html.Div([
-                html.Label("PSU Selection", className="sidebar-label"),
-                dcc.Dropdown(id="psu-dropdown", options=[], multi=True, value=[], placeholder="All PSUs"),
-            ], className="filter-group"),
-            
+            # Filter Groups (Reverted to flat layout)
             html.Div([
                 html.Label("Beneficiary Type", className="sidebar-label"),
                 dcc.Dropdown(id="benificiery-dropdown", options=[], multi=True, value=[], placeholder="All Beneficiaries"),
@@ -926,11 +1183,9 @@ app.layout = html.Div([
                 dcc.Dropdown(id="anemia-dropdown", options=[{"label": x.capitalize(), "value": x} for x in anemia_list], multi=True, value=[], placeholder="All Categories"),
             ], className="filter-group"),
 
-            dbc.Button([html.I(className="fas fa-broom me-2"), "Clear All Filters"], 
+            dbc.Button("Clear All Filters", 
                        id="btn-clear", color="secondary", outline=True, size="sm", 
-                       className="w-100 mb-3", style={"fontSize": "0.75rem", "borderRadius": "8px"}),
-
-            html.Hr(style={"margin": "24px 0", "opacity": "0.1"}),
+                       className="w-100 mb-4", style={"fontSize": "0.75rem", "borderRadius": "8px"}),
 
             html.Div([
                 html.Label("Management Tools", className="sidebar-label"),
@@ -951,21 +1206,14 @@ app.layout = html.Div([
                 html.Div(className="status-dot"),
                 html.Span("Live Data Connection")
             ], className="status-badge")
-        ], style={"marginTop": "auto"})
+        ], style={"marginTop": "auto", "padding": "10px 0"})
     ], id="sidebar", className="sidebar"),
     
     # Main Content
     html.Div([
-        # Top Header
-        html.Div([
-            html.Div([
-                html.H1("Prakash - Koppal District Study", className="dashboard-title"),
-                html.P("Surveillance Dashboard for Anemia Monitoring", className="text-muted", style={"margin": 0})
-            ]),
-        ], className="top-header"),
-        
-        # KPI Section
+        # Main Dashboard Grid
         dbc.Row([
+            # KPI Section (Moved up to top row since branding is now in fixed top bar)
             dbc.Col(html.Div([
                 html.Div([html.I(className="fas fa-users kpi-icon"), html.P("Total Enrolled", className="kpi-label")], className="kpi-header"),
                 html.H3(id="total", className="kpi-value")
@@ -997,7 +1245,7 @@ app.layout = html.Div([
             ], className="kpi-card"), xs=6, sm=4, md=True),
             
             dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-droplet kpi-icon", style={"color": "#991b1b"}), html.P("Avg Hb", className="kpi-label")], className="kpi-header"),
+                html.Div([html.I(className="fas fa-droplet kpi-icon", style={"color": "#991b1b"}), html.P("Avg Hb (g/dL)", className="kpi-label")], className="kpi-header"),
                 html.H3(id="avg-hgb", className="kpi-value")
             ], className="kpi-card"), xs=6, sm=4, md=True),
         ], className="mb-4 g-3"),
@@ -1025,10 +1273,21 @@ app.layout = html.Div([
         ], className="mb-4 g-3"),
         
         # Comparison Section
-        html.Div([
-            html.H5("Area-wise Anemia Comparison", className="graph-title"),
-            dcc.Loading(dcc.Graph(id="anemia-area-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "500px"}), type="default"),
-        ], className="graph-card mb-4"),
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H5("PSU-wise Anemia Classification", className="graph-title"),
+                    dcc.Loading(dcc.Graph(id="anemia-village-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
+                ], className="graph-card")
+            ], xs=12, lg=6),
+            
+            dbc.Col([
+                html.Div([
+                    html.H5("PSU-wise Hemoglobin Analysis (Mean & SD)", className="graph-title"),
+                    dcc.Loading(dcc.Graph(id="hgb-stats-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
+                ], className="graph-card")
+            ], xs=12, lg=6),
+        ], className="mb-4 g-3"),
         
         # Table Section
         html.Div([
@@ -1036,7 +1295,7 @@ app.layout = html.Div([
             dcc.Loading(dash_table.DataTable(
                 id="table", page_size=15, filter_action="native", sort_action="native",
                 style_table={"overflowX": "auto", "minWidth": "100%"}, 
-                style_cell={"padding": "12px", "textAlign": "left", "fontFamily": "Inter", "fontSize": "0.875rem", "minWidth": "150px"},
+                style_cell={"padding": "12px", "textAlign": "left", "fontFamily": "-apple-system, BlinkMacSystemFont, sans-serif", "fontSize": "0.875rem", "minWidth": "150px"},
                 style_header={"fontWeight": "600", "backgroundColor": "#f8fafc", "color": "#475569", "borderBottom": "2px solid #e2e8f0"},
                 fixed_rows={'headers': True},
                 style_data_conditional=[
@@ -1047,7 +1306,16 @@ app.layout = html.Div([
                     {'if': {'filter_query': '{anemia_category} = "Incomplete"'}, 'backgroundColor': '#f8fafc', 'color': '#475569'},
                 ]
             ), type="default")
-        ], className="graph-card")
+        ], className="graph-card"),
+        
+        # Footer Section
+        html.Footer([
+            html.Hr(style={"margin": "40px 0 20px 0", "opacity": "0.1"}),
+            html.Div([
+                html.P("Copyright © 2026 ICMR CAR MEDTECH LAB | St Johns's Research Institute, Bangalore",
+                       style={"fontSize": "0.75rem", "color": "#64748b", "textAlign": "center", "marginBottom": "20px"})
+            ], className="footer-content")
+        ], className="dashboard-footer")
     ], id="main-content", className="main-content")
 ], id="main-container")
 
@@ -1068,6 +1336,11 @@ def toggle_sidebar(n, current_class):
 @app.callback(Output("stored-data", "data"), Input("interval", "n_intervals"))
 def refresh_data(_):
     df, msg, is_err = load_data()
+    
+    # Automatically sync to sheets in a BACKGROUND THREAD to prevent blocking the UI
+    if not is_err and not df.empty:
+        threading.Thread(target=sync_data_to_sheets, args=(df,), daemon=True).start()
+        
     return {
         "records": df.to_dict("records"),
         "status": msg,
@@ -1082,26 +1355,27 @@ def refresh_data(_):
         Output("mild-count", "children"), Output("avg-hgb", "children"),
         Output("prevalence-val", "children"),
         Output("map", "figure"), Output("benificiery-bar", "figure"),
-        Output("anemia-pie", "figure"), Output("anemia-area-bar", "figure"),
+        Output("anemia-pie", "figure"), Output("anemia-village-bar", "figure"),
+        Output("hgb-stats-bar", "figure"),
         Output("table", "data"), Output("table", "columns"),
-        Output("area-dropdown", "options"), Output("psu-dropdown", "options"),
+        Output("location-dropdown", "options"),
         Output("benificiery-dropdown", "options"), Output("anemia-dropdown", "options"),
-        Output("psu-dropdown", "value"), Output("area-dropdown", "value"),
+        Output("location-dropdown", "value"),
         Output("benificiery-dropdown", "value"), Output("anemia-dropdown", "value"),
         Output("urgent-alerts-list", "children"),
     ],
     [
-        Input("stored-data", "data"), Input("psu-dropdown", "value"),
-        Input("area-dropdown", "value"), Input("benificiery-dropdown", "value"),
+        Input("stored-data", "data"), Input("location-dropdown", "value"),
+        Input("benificiery-dropdown", "value"),
         Input("anemia-dropdown", "value"), Input("interval", "n_intervals"),
         Input("map", "clickData"), Input("anemia-pie", "clickData"),
         Input("benificiery-bar", "clickData"), Input("btn-clear", "n_clicks"),
     ]
 )
-def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear):
+def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear):
     if not stored_dict or "records" not in stored_dict:
-        # Return 22 elements to match the number of outputs
-        return [0]*7 + [go.Figure()]*4 + [[], [], [], [], [], [], [], [], [], [], []]
+        # Return 21 elements to match the number of outputs
+        return [0]*7 + [go.Figure()]*5 + [[]]*9
     
     records = stored_dict["records"]
     status_msg = stored_dict["status"]
@@ -1109,68 +1383,82 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
     last_upd = stored_dict.get("last_updated", "")
 
     if not records and is_error:
-        # Return 22 elements
-        return [0]*7 + [go.Figure()]*4 + [[], [], [], [], [], [], [], [], [], [], []]
+        # Return 21 elements
+        return [0]*7 + [go.Figure()]*5 + [[]]*9
 
     df_full = pd.DataFrame(records)
     
     ctx = callback_context
     triggered_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
 
+    # EXTREME LOGGING: INPUTS
+    print(f"\n>>> CALLBACK START: {triggered_id}")
+    print(f">>> INPUT LOCATION: {location}")
+    print(f">>> INPUT BENIF: {benificiery}")
+    print(f">>> INPUT ANEMIA: {anemia}")
+    
+    # FORCED TYPE ENFORCEMENT
+    location = [location] if isinstance(location, str) else (location or [])
+    benificiery = [benificiery] if isinstance(benificiery, str) else (benificiery or [])
+    anemia = [anemia] if isinstance(anemia, str) else (anemia or [])
+    
+    # TRACE LOGGING
+    print(f"DEBUG: Trigger: {triggered_id} | In Location: {location} | Map Click: {'Present' if map_click else 'None'}")
+
     # Handle Chart Interactions (Cross-Filtering)
     if triggered_id == "btn-clear":
-        psu, area, benificiery, anemia = [], [], [], []
+        print("DEBUG: Clearing all filters via button.")
+        location, benificiery, anemia = [], [], []
         
     elif triggered_id == "map" and map_click:
         village_clicked = map_click["points"][0].get("text")
+        print(f"DEBUG: Map clicked on: {village_clicked}")
         if village_clicked and village_clicked in df_full["PSU Name"].values:
-            psu = [village_clicked] if not psu or village_clicked not in psu else psu
+            # Find the full location string for this PSU
+            loc_val = df_full[df_full["PSU Name"] == village_clicked]["Location"].iloc[0]
+            if not location or loc_val not in location:
+                location = [loc_val] 
+                print(f"DEBUG: Location updated from map to: {location}")
+            else:
+                print("DEBUG: Location already contains this village, no change.")
             
     elif triggered_id == "anemia-pie" and pie_click:
         cat_clicked = pie_click["points"][0].get("label").lower()
         if cat_clicked:
-            anemia = [cat_clicked] if not anemia or cat_clicked not in anemia else anemia
+            anemia = [cat_clicked]
+            print(f"DEBUG: Anemia filter updated to: {anemia}")
 
     elif triggered_id == "benificiery-bar" and bar_click:
         benif_clicked = bar_click["points"][0].get("x")
         if benif_clicked:
-            benificiery = [benif_clicked] if not benificiery or benif_clicked not in benificiery else benificiery
+            benificiery = [benif_clicked]
+            print(f"DEBUG: Beneficiary filter updated to: {benificiery}")
 
     driver_triggers = ["stored-data", "interval"]
     # We will always update the dashboard components to ensure they stay in sync with filters
     is_full_update = True 
 
     # Dynamic Options (Cascading Filters)
-    # 1. PSU options: Filtered by Area, Benificiery, Anemia
-    df_psu = df_full.copy()
-    if area: df_psu = df_psu[df_psu["Area COde"].astype(str).isin(area)]
-    if benificiery: df_psu = df_psu[df_psu["Benificiery"].isin(benificiery)]
-    if anemia: df_psu = df_psu[df_psu["anemia_category"].isin(anemia)]
-    psu_opts = [{"label": x, "value": x} for x in sorted(df_psu["PSU Name"].dropna().unique())]
+    # 1. Location options: Filtered by Benificiery, Anemia
+    df_loc = df_full.copy()
+    if benificiery: df_loc = df_loc[df_loc["Benificiery"].isin(benificiery)]
+    if anemia: df_loc = df_loc[df_loc["anemia_category"].isin(anemia)]
+    loc_opts = [{"label": x, "value": x} for x in sorted(df_loc["Location"].dropna().unique())]
 
-    # Clean up PSU selection if not in new options
-    if psu:
-        valid_psus = [o["value"] for o in psu_opts]
-        psu = [p for p in psu if p in valid_psus]
+    # Clean up Location selection if not in new options
+    if location:
+        valid_locs = [o["value"] for o in loc_opts]
+        location = [l for l in location if l in valid_locs]
 
-    # 2. Area options: Filtered by PSU, Benificiery, Anemia
-    df_area = df_full.copy()
-    if psu: df_area = df_area[df_area["PSU Name"].isin(psu)]
-    if benificiery: df_area = df_area[df_area["Benificiery"].isin(benificiery)]
-    if anemia: df_area = df_area[df_area["anemia_category"].isin(anemia)]
-    area_opts = [{"label": x, "value": x} for x in sorted(df_area["Area COde"].dropna().unique())]
-
-    # 3. Benificiery options: Filtered by Area, PSU, Anemia
+    # 2. Benificiery options: Filtered by Location, Anemia
     df_benif = df_full.copy()
-    if area: df_benif = df_benif[df_benif["Area COde"].astype(str).isin(area)]
-    if psu: df_benif = df_benif[df_benif["PSU Name"].isin(psu)]
+    if location: df_benif = df_benif[df_benif["Location"].isin(location)]
     if anemia: df_benif = df_benif[df_benif["anemia_category"].isin(anemia)]
     benif_opts = [{"label": x, "value": x} for x in sorted(df_benif["Benificiery"].dropna().unique())]
 
-    # 4. Anemia options: Filtered by Area, PSU, Benificiery (Logic added for dynamic cascading)
+    # 3. Anemia options: Filtered by Location, Benificiery (Logic added for dynamic cascading)
     df_anemia_opts = df_full.copy()
-    if area: df_anemia_opts = df_anemia_opts[df_anemia_opts["Area COde"].astype(str).isin(area)]
-    if psu: df_anemia_opts = df_anemia_opts[df_anemia_opts["PSU Name"].isin(psu)]
+    if location: df_anemia_opts = df_anemia_opts[df_anemia_opts["Location"].isin(location)]
     if benificiery: df_anemia_opts = df_anemia_opts[df_anemia_opts["Benificiery"].isin(benificiery)]
     # Normalize anemia categories to capitalize for label
     anemia_opts_raw = sorted(df_anemia_opts["anemia_category"].dropna().unique())
@@ -1178,8 +1466,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
 
     # Apply all final filters to the main df for stats/charts
     df = df_full.copy()
-    if psu: df = df[df["PSU Name"].isin(psu)]
-    if area: df = df[df["Area COde"].astype(str).isin(area)]
+    if location: df = df[df["Location"].isin(location)]
     if benificiery: df = df[df["Benificiery"].isin(benificiery)]
     if anemia: 
         # Ensure case-insensitive matching for anemia category
@@ -1212,6 +1499,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
     table_order = [
         "SL.NO", "ID", "enrollment_date", "Area COde", "PSU Name",
         "Name", "Household Name", "Gender", "Benificiery", "Age",
+        "Length", "Height", "Weight", "BMI",
         "sample_status", "Sample Collected Date", "Collected By",
         "HGB", "anemia_category", "Asha_Worker", "whatsapp", "field_investigator", "Diet", "data_operator"
     ]
@@ -1275,94 +1563,206 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
         if age < 50: return "40-49 Years"
         return "50+ Years"
 
+    # Inverse map to get codes from names
+    NAME_TO_CODE = {v: k for k, v in BENEFICIARY_MAP.items()}
+
     benif_counts = df["Benificiery"].value_counts().sort_index()
     age_hover_data = []
+    labels_with_codes = []
+    
     for b_group in benif_counts.index:
+        # Get numeric code
+        b_code = NAME_TO_CODE.get(b_group, b_group)
+        labels_with_codes.append(str(b_code))
+        
+        # Get age breakdown for hover
         sub = df[df["Benificiery"] == b_group]
         buckets = sub["Age"].apply(get_age_bucket).value_counts()
-        # Sort buckets logically if possible, or just by index
         b_str = "<br>".join([f"• {b}: {c}" for b, c in buckets.items()])
-        age_hover_data.append(b_str)
+        
+        # Build the full hover text
+        hover_label = f"<span style='font-size:14px; color:#1e293b'><b>{b_code}: {b_group}</b></span><br>"
+        age_hover_data.append(hover_label + f"Total: <b>{len(sub)}</b><br><br><b>Age Breakdown:</b><br>" + b_str)
 
-    benif_bar = go.Figure([go.Bar(
-        x=benif_counts.index, 
-        y=benif_counts.values, 
+    # Beneficiary Distribution (Vertical Bar with Codes)
+    benif_bar = go.Figure(go.Bar(
+        x=labels_with_codes,
+        y=benif_counts.values,
+        marker=dict(
+            color="#6366f1",
+            line=dict(color="#312e81", width=2)
+        ),
         customdata=age_hover_data,
-        hovertemplate="<b>%{x}</b><br>Total: %{y}<br><br><b>Age Breakdown:</b><br>%{customdata}<extra></extra>",
-        marker_color="#3b82f6",
-        marker_line_width=0,
-        opacity=0.8
-    )])
+        hovertemplate="%{customdata}<extra></extra>",
+        opacity=0.9
+    ))
     benif_bar.update_layout(
-        margin=dict(t=20, b=100, l=40, r=20),
-        xaxis=dict(tickangle=-45, automargin=True, title=None, showgrid=False, tickfont=dict(size=9)),
-        yaxis=dict(title=None, automargin=True, showgrid=True, gridcolor="#f1f5f9"),
+        margin=dict(t=40, b=110, l=40, r=20),
+        xaxis=dict(
+            title=dict(text="Beneficiary Code", standoff=0), 
+            automargin=True, 
+            showgrid=False, 
+            tickfont=dict(size=12, color="#64748b")
+        ),
+        yaxis=dict(title="Count", automargin=True, showgrid=True, gridcolor="#f1f5f9", tickfont=dict(color="#64748b")),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        height=265
+        hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
+        height=360 
     )
 
+    # Anemia pie
     anemia_counts = df["anemia_category"].value_counts()
-    colors = [color_map.get(l, "#95a5a6") for l in anemia_counts.index]
-    anemia_pie = go.Figure([go.Pie(
-        labels=[l.capitalize() for l in anemia_counts.index], 
-        values=anemia_counts.values, 
-        hole=0.6, 
-        marker=dict(colors=colors, line=dict(color='#ffffff', width=2)),
-        textinfo='percent',
-        hoverinfo='label+value'
-    )])
+    anemia_pie = go.Figure(go.Pie(
+        labels=[str(l).capitalize() for l in anemia_counts.index],
+        values=anemia_counts.values,
+        hole=0.6,
+        marker=dict(colors=[color_map.get(str(l).lower(), "#cbd5e1") for l in anemia_counts.index],
+                    line=dict(color='white', width=3)), # Wider border for pie focus
+        textinfo="percent",
+        hovertemplate="<b>%{label}</b><br>Count: <b>%{value}</b> (%{percent})<extra></extra>",
+        opacity=0.95
+    ))
     anemia_pie.update_layout(
-        margin=dict(t=20, b=40, l=20, r=20),
-        legend=dict(
-            orientation="h", 
-            yanchor="bottom", 
-            y=-0.25, 
-            xanchor="center", 
-            x=0.5, 
-            font=dict(size=10),
-            bgcolor="rgba(255,255,255,0.5)"
-        ),
-        plot_bgcolor="rgba(0,0,0,0)", 
-        paper_bgcolor="rgba(0,0,0,0)",
-        height=265
+        margin=dict(t=10, b=10, l=10, r=10),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5, font=dict(size=10, color="#64748b")),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
+        height=250
     )
     # Give the pie more room
     anemia_pie.update_traces(domain=dict(y=[0.2, 1.0]))
 
-    area_anemia = df.groupby(["Area COde", "anemia_category"]).size().unstack(fill_value=0)
+    # Village-wise Anemia Classification (Stacked Bar with Area Codes)
+    psu_to_code = df.set_index("PSU Name")["Area COde"].to_dict() if not df.empty else {}
     
-    # Detailed hover info (Villages and their counts per Area and Category)
-    hover_info = {}
-    if not df.empty:
-        for (a_name, cat), sub_df in df.groupby(["Area COde", "anemia_category"]):
-            v_counts = sub_df["PSU Name"].value_counts()
-            v_str = "<br>".join([f"{v}: {count}" for v, count in v_counts.items()])
-            hover_info[(str(a_name), cat)] = v_str
+    village_anemia = df.groupby(["PSU Name", "anemia_category"]).size().unstack(fill_value=0)
+    village_area_codes = [str(psu_to_code.get(psu, psu)) for psu in village_anemia.index]
+    
+    # Pre-calculate a "dialogue box" summary for each PSU
+    psu_summaries = []
+    for psu in village_anemia.index:
+        counts = village_anemia.loc[psu]
+        summary = f"<span style='font-size:16px; color:#1e293b'><b>{psu}</b></span><br>"
+        # Using Category names the user requested
+        summary += f"Severe: <b>{counts.get('severe', 0)}</b><br>"
+        summary += f"Moderate: <b>{counts.get('moderate', 0)}</b><br>"
+        summary += f"Mild: <b>{counts.get('mild', 0)}</b><br>"
+        summary += f"Normal: <b>{counts.get('normal', 0)}</b>"
+        psu_summaries.append(summary)
 
-    anemia_area_bar = go.Figure()
+    anemia_village_bar = go.Figure()
     for cat in ["normal", "mild", "moderate", "severe", "incomplete"]:
-        if cat in area_anemia:
-            custom_hover = [hover_info.get((str(a_code), cat), "No data") for a_code in area_anemia.index]
-            
-            anemia_area_bar.add_bar(
+        if cat in village_anemia:
+            anemia_village_bar.add_bar(
                 name=cat.capitalize(), 
-                x=area_anemia.index.astype(str), 
-                y=area_anemia[cat], 
-                customdata=custom_hover,
-                hovertemplate="<b>Status: " + cat.capitalize() + "</b><br>%{customdata}<extra></extra>",
-                marker_color=color_map.get(cat), 
-                opacity=0.85
+                x=village_anemia.index, # Setting X to Name for Header
+                y=village_anemia[cat], 
+                customdata=psu_summaries, 
+                hovertemplate="%{customdata}<extra></extra>",
+                marker=dict(
+                    color=color_map.get(cat),
+                    line=dict(color='white', width=1.5)
+                ),
+                opacity=0.95
             )
-    anemia_area_bar.update_layout(
+            
+    anemia_village_bar.update_layout(
         barmode="stack", 
+        hovermode="closest",
         margin=dict(t=30, b=80, l=40, r=20),
-        xaxis=dict(title="Area Code", automargin=True, showgrid=False, type='category'),
-        yaxis=dict(title="Count", automargin=True, showgrid=True, gridcolor="#f1f5f9"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
+        xaxis=dict(
+            title=dict(text="Area Code", standoff=0), 
+            tickvals=village_anemia.index, # Map Names to Ticks
+            ticktext=village_area_codes, # Show Codes on Ticks
+            automargin=True, 
+            showgrid=False, 
+            tickfont=dict(size=11, color="#64748b"),
+            showspikes=True, spikemode="across", spikesnap="cursor", showline=True, spikedash="dot", spikecolor="#94a3b8", spikethickness=1
+        ),
+        yaxis=dict(title="Beneficiaries", automargin=True, showgrid=True, gridcolor="#f1f5f9", tickfont=dict(color="#64748b")),
+        legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5, font=dict(size=11, color="#475569")),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        hoverlabel=dict(bgcolor="white", font_size=12, font_family="Inter"),
-        height=500
+        hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
+        height=450,
+        bargap=0.2
     )
+
+    # --- Village-wise Bar Chart (Mean & SD STATS) ---
+    hgb_data = df.dropna(subset=["HGB", "PSU Name"])
+    hgb_stats_fig = go.Figure()
+
+    if not hgb_data.empty:
+        # Calculate stats per village
+        stats = hgb_data.groupby("PSU Name")["HGB"].agg(["mean", "std", "count"]).reset_index().round(2)
+        
+        # Calculate Anemic Count (Mild + Moderate + Severe)
+        anemic_df = df[df["anemia_category"].str.lower().isin(["mild", "moderate", "severe"])]
+        anemic_counts = anemic_df.groupby("PSU Name").size().reset_index(name="anemic_count")
+        
+        # Merge to ensure alignment
+        stats = pd.merge(stats, anemic_counts, on="PSU Name", how="left").fillna(0)
+        stats = stats.sort_values("PSU Name")
+        
+        # Bar Chart with Tooltip info (Area Codes for labels)
+        stats["area_code"] = stats["PSU Name"].map(psu_to_code).astype(str)
+        
+        hgb_stats_fig.add_trace(go.Bar(
+            x=stats["PSU Name"],
+            y=stats["mean"],
+            error_y=dict(type='data', array=stats["std"], visible=True, color="#312e81", thickness=2, width=6),
+            marker=dict(
+                color="#6366f1",
+                line=dict(color="#312e81", width=2),
+            ),
+            opacity=0.9,
+            name="Mean HGB",
+            text=stats["mean"],
+            textposition="auto",
+            textfont=dict(color="white", size=10, family="-apple-system, BlinkMacSystemFont, sans-serif"),
+            customdata=stats[["PSU Name", "area_code", "std", "count", "anemic_count"]].values.tolist(),
+            hovertemplate=(
+                "<span style='font-size:16px; color:#1e293b'><b>%{customdata[0]}</b></span><br>" +
+                "Mean HGB: <b>%{y} g/dL</b><br>" +
+                "Std Dev: <b>%{customdata[2]}</b><br>" +
+                "Total Samples: <b>%{customdata[3]}</b><br>" +
+                "Anemic Count: <b>%{customdata[4]}</b><extra></extra>"
+            )
+        ))
+        
+        group_avg = hgb_data["HGB"].mean()
+        # Add the reference line 
+        hgb_stats_fig.add_hline(y=group_avg, line_dash="dash", line_color="#10b981", line_width=2)
+        
+        # Add legend-style annotation
+        hgb_stats_fig.add_annotation(
+            xref="paper", yref="paper",
+            x=1.0, y=1.08,
+            text=f"<span style='color:#10b981'><b>--</b></span> Dataset Average: <b>{group_avg:.2f}</b>",
+            showarrow=False,
+            font=dict(size=12, family="-apple-system, BlinkMacSystemFont, sans-serif", color="#475569"),
+            xanchor="right", yanchor="bottom"
+        )
+
+    hgb_stats_fig.update_layout(
+        margin=dict(t=50, b=80, l=50, r=20),
+        hovermode="closest",
+        xaxis=dict(
+            title=dict(text="Area Code", standoff=0), 
+            tickvals=stats["PSU Name"] if not hgb_data.empty else [],
+            ticktext=stats["area_code"] if not hgb_data.empty else [],
+            automargin=True, 
+            showgrid=False, 
+            tickfont=dict(size=11, color="#64748b"),
+            showspikes=True, spikemode="across", spikesnap="cursor", showline=True, spikedash="dot", spikecolor="#94a3b8", spikethickness=1
+        ),
+        yaxis=dict(title="Avg Hemoglobin (g/dL)", automargin=True, showgrid=True, gridcolor="#f1f5f9", tickfont=dict(color="#64748b")),
+        plot_bgcolor="white", paper_bgcolor="rgba(0,0,0,0)",
+        hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
+        height=450,
+        showlegend=False,
+        bargap=0.2
+    )
+    # ----------------------------------------------
 
     # Urgent Alerts (Severe Anemia)
     urgent_df = df_full[df_full["anemia_category"] == "severe"].head(10)
@@ -1379,7 +1779,7 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
             encoded_msg = urllib.parse.quote(msg)
             link = f"https://wa.me/{contact}?text={encoded_msg}"
             wa_btn = html.A(html.I(className="fab fa-whatsapp", style={"color": "#25D366", "marginLeft": "10px", "fontSize": "1.1rem"}), 
-                           href=link, target="_blank")
+                            href=link, target="_blank")
 
         urgent_list.append(html.Div([
             html.Div([
@@ -1395,7 +1795,26 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
     if not urgent_list:
         urgent_list = [html.P("No urgent cases found.", className="text-muted", style={"fontSize": "0.75rem"})]
 
-    return (total, normal_kpi, moderate_kpi, severe_kpi, mild_kpi, avg_hgb, prevalence_str, map_fig, benif_bar, anemia_pie, anemia_area_bar, df_table.to_dict("records"), [{"name": "Notify Asha" if c == "whatsapp" else ("HGB (g/dL)" if c == "HGB" else c), "id": c, "presentation": "markdown" if c == "whatsapp" else "input"} for c in available_cols], area_opts, psu_opts, benif_opts, anemia_opts, psu, area, benificiery, anemia, urgent_list)
+    # Define display names for specific columns
+    col_names = {
+        "whatsapp": "Notify Asha",
+        "HGB": "HGB (g/dL)",
+        "Length": "Length (Age < 2 years)",
+        "Height": "Height (cm)",
+        "Weight": "Weight (kg)"
+    }
+    
+    table_cols = [
+        {
+            "name": col_names.get(c, c), 
+            "id": c, 
+            "presentation": "markdown" if c == "whatsapp" else "input"
+        } for c in available_cols
+    ]
+
+    print(f">>> RETURNING LOCATION: {location}")
+    print(f">>> CALLBACK END: {triggered_id}\n")
+    return (total, normal_kpi, moderate_kpi, severe_kpi, mild_kpi, avg_hgb, prevalence_str, map_fig, benif_bar, anemia_pie, anemia_village_bar, hgb_stats_fig, df_table.to_dict("records"), table_cols, loc_opts, benif_opts, anemia_opts, location, benificiery, anemia, urgent_list)
 
 # =========================
 # EXPORT CALLBACKS
@@ -1403,32 +1822,45 @@ def update_dashboard(stored_dict, psu, area, benificiery, anemia, n_intervals, m
 @app.callback(
     Output("download-data", "data"),
     [Input("btn-excel", "n_clicks"), Input("btn-csv", "n_clicks")],
-    [State("stored-data", "data"), State("psu-dropdown", "value"), State("area-dropdown", "value"),
+    [State("stored-data", "data"), State("location-dropdown", "value"),
      State("benificiery-dropdown", "value"), State("anemia-dropdown", "value")],
     prevent_initial_call=True
 )
-def export_data(n_excel, n_csv, stored_dict, psu, area, benif, anemia):
-    if not stored_dict or "records" not in stored_dict:
+def export_data(n_excel, n_csv, stored_dict, location, benif, anemia):
+    if not callback_context.triggered:
         return no_update
+        
+    if not stored_dict or "records" not in stored_dict:
+        print("DEBUG: Export failed - No data in stored_dict")
+        return no_update
+    
+    print(f"DEBUG: Export triggered. Filters - Loc: {location}, Benif: {benif}, Anemia: {anemia}")
     
     df = pd.DataFrame(stored_dict["records"])
     
-    # Apply filters (Note: because dropdowns are synced with charts in update_dashboard, 
-    # the psu/area/benif/anemia values here reflect the latest interactive state)
-    if psu:
-        df = df[df["PSU Name"].isin(psu)]
-    if area: 
-        # Area code can be numeric or string in the source, handle both
-        df = df[df["Area COde"].astype(str).isin([str(a) for a in area])]
+    # Robust Type Enforcement for Filters
+    location = [location] if isinstance(location, str) else (location or [])
+    benif = [benif] if isinstance(benif, str) else (benif or [])
+    anemia = [anemia] if isinstance(anemia, str) else (anemia or [])
+    
+    # Apply filters
+    if location:
+        df = df[df["Location"].isin(location)]
     if benif:
         df = df[df["Benificiery"].isin(benif)]
     if anemia:
-        # Normalize to lowercase for robust matching
         anemia_lower = [str(x).lower() for x in anemia]
         df = df[df["anemia_category"].str.lower().isin(anemia_lower)]
 
+    # Format dates for export (DD/MM/YYYY)
+    date_cols = ["enrollment_date", "Sample Collected Date"]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%d/%m/%Y').fillna("")
+
     ctx = callback_context
     trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+    print(f"DEBUG: Exporting {len(df)} records. Trigger: {trigger}")
 
     if trigger == "btn-csv":
         return dcc.send_data_frame(df.to_csv, "prakash_data_export.csv", index=False)
@@ -1437,5 +1869,5 @@ def export_data(n_excel, n_csv, stored_dict, psu, area, benif, anemia):
         return dcc.send_data_frame(df.to_excel, "prakash_data_export.xlsx", index=False, engine="openpyxl")
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    app.run(debug=True, host="0.0.0.0", port=8060)
 
