@@ -1300,7 +1300,7 @@ app.layout = html.Div([
         
         # Table Section
         html.Div([
-            html.H5("Detailed Patient Records", className="graph-title"),
+            html.H5("Detailed Beneficiary Records", className="graph-title"),
             dcc.Loading(dash_table.DataTable(
                 id="table", page_size=15, filter_action="native", sort_action="native",
                 style_table={"overflowX": "auto", "minWidth": "100%"}, 
@@ -1530,7 +1530,7 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
                     summary_parts.append(f"*{cat}*:\n- {id_list}")
             
             summary_text = "\n\n".join(summary_parts)
-            asha_summaries[asha] = f"Hello {asha}, here is the combined list of anemic patients for follow-up:\n\n{summary_text}\n\nPlease check on them today."
+            asha_summaries[asha] = f"Hello {asha}, here is the combined list of anemic subjects for follow-up:\n\n{summary_text}\n\nPlease check on them today."
 
     # Generate WhatsApp Links for table [Grouped Version]
     def generate_wa_link(row):
