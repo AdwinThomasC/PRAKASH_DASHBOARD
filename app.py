@@ -11,6 +11,9 @@ from datetime import datetime
 import threading
 
 
+import flask
+import os
+
 # =========================
 # DASH INIT
 # =========================
@@ -19,6 +22,12 @@ app = dash.Dash(__name__, external_stylesheets=[
     "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
 ])
 server = app.server
+
+@server.route('/images.png')
+def serve_image():
+    # Use the directory where app.py is located
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    return flask.send_from_directory(root_dir, 'images.png')
 
 # =========================
 # EMBEDDED CSS
@@ -1143,7 +1152,7 @@ app.layout = html.Div([
             html.Span("PRAKASH", style={"fontWeight": "800", "fontSize": "1.75rem", "marginRight": "10px"}),
             html.Span("AMB 2.0 T³", className="glowing-badge", style={"fontSize": "0.9rem"})
         ], className="top-bar-title"),
-        html.Img(src=app.get_asset_url("images.png"), style={"height": "70px", "mixBlendMode": "multiply"})
+        html.Img(src="/images.png", style={"height": "70px", "mixBlendMode": "multiply"})
     ], className="top-bar"),
 
     # Mobile Header (Only visible on mobile)
@@ -1153,7 +1162,7 @@ app.layout = html.Div([
             html.Span("PRAKASH", style={"fontWeight": "800", "fontSize": "1.1rem", "marginRight": "5px"}),
             html.Span("AMB 2.0 T³", className="glowing-badge", style={"fontSize": "0.65rem", "padding": "1px 6px"})
         ], style={"display": "flex", "alignItems": "center", "marginLeft": "10px", "flex": "1"}),
-        html.Img(src=app.get_asset_url("images.png"), style={"height": "45px", "mixBlendMode": "multiply", "marginLeft": "auto"})
+        html.Img(src="/images.png", style={"height": "45px", "mixBlendMode": "multiply", "marginLeft": "auto"})
     ], className="mobile-nav"),
 
     html.Div([
