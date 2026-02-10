@@ -11,8 +11,10 @@ from datetime import datetime
 import threading
 
 
+
 import flask
 import os
+from who_standards import calculate_bmi_z_score, classify_who_z_score
 
 # =========================
 # DASH INIT
@@ -854,7 +856,7 @@ def load_data():
             "SL.NO", "ID", "enrollment_date", "Area COde", "PSU Name",
             "Name", "Household Name", "Gender", "Benificiery", "DOB", "Age",
             "sample_status", "Sample Collected Date", "Collected By",
-            "HGB", "anemia_category", "field_investigator", "Diet", "data_operator",
+            "HGB", "anemia_category", "field_investigator", "Diet", "Diet1", "data_operator",
             "Asha_Worker", "Aasha_Contact", "Length", "Height", "Weight"
         ]
         df = df[[c for c in required_cols if c in df.columns]]
@@ -873,20 +875,63 @@ def load_data():
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
         # Calculate BMI: Weight(kg) / [Height(m)]²
-        # Uses Height if available, otherwise Length
+        # Row-level fallback: Use Height if available, otherwise use Length
         if "Weight" in df.columns:
-            h_col = "Height" if "Height" in df.columns else ("Length" if "Length" in df.columns else None)
-            if h_col:
-                # height in meters, ensure not zero
-                valid_h = (df[h_col] > 0)
-                df["BMI"] = None
-                df.loc[valid_h, "BMI"] = (df.loc[valid_h, "Weight"] / ((df.loc[valid_h, h_col] / 100.0) ** 2)).round(1)
-            else:
-                df["BMI"] = None
+            h_vals = df["Height"] if "Height" in df.columns else (df["Length"] if "Length" in df.columns else pd.Series([None] * len(df)))
+            if "Height" in df.columns and "Length" in df.columns:
+                h_vals = df["Height"].fillna(df["Length"])
+            
+            # height in meters, ensure not zero
+            valid_mask = (df["Weight"] > 0) & (h_vals > 0)
+            df["BMI"] = None
+            df.loc[valid_mask, "BMI"] = (df.loc[valid_mask, "Weight"] / ((h_vals.loc[valid_mask] / 100.0) ** 2)).round(1)
         else:
             df["BMI"] = None
+
+        def classify_nutritional_status(row):
+            bmi = row.get("BMI")
+            age_y = row.get("Age")
+            gender_raw = str(row.get("Gender", "")).lower().strip()
+            
+            if pd.isna(bmi) or bmi is None: return "Unknown"
+            
+            try:
+                val = float(bmi)
+            except:
+                return "Unknown"
+
+            # Map Gender to WHO 'boys'/'girls'
+            gender_who = None
+            if gender_raw in ["male", "m", "boy", "boys"]:
+                gender_who = "boys"
+            elif gender_raw in ["female", "f", "girl", "girls"]:
+                gender_who = "girls"
+
+            # Use WHO Z-scores for children < 19 if gender is known
+            if age_y is not None and not pd.isna(age_y) and gender_who:
+                try:
+                    age_val = float(age_y)
+                    if age_val < 19:
+                        age_m = age_val * 12.0
+                        # Try/Except inside loop to prevent single row failure from crashing everything
+                        try:
+                            z = calculate_bmi_z_score(val, gender_who, age_m)
+                            if z is not None:
+                                return classify_who_z_score(z, age_m)
+                        except Exception as z_err:
+                            print(f"DEBUG: Z-score calculation failed for row: {z_err}")
+                except Exception as e:
+                    # Fallback to adult logic on error
+                    pass
+
+            # Adult Fallback (>= 19 or unknown gender/age)
+            if val < 18.5: return "Underweight"
+            if val < 25.0: return "Normal"
+            if val < 30.0: return "Overweight"
+            return "Obese"
         
-        # Parse Age with special logic
+        # We need Age to be parsed BEFORE classification
+        # Parse Age with special logic FIRST
         if "Age" in df.columns:
             df["Age"] = df["Age"].apply(parse_age)
         else:
@@ -911,6 +956,9 @@ def load_data():
                     df.loc[mask, "Age"] = calculated_ages.apply(lambda x: x if 0 <= x < 150 else None)
                 except Exception as age_err:
                     print(f"DEBUG: Age calculation fallback failed: {age_err}")
+
+        # Now apply classification using the populated Age
+        df["bmi_category"] = df.apply(classify_nutritional_status, axis=1)
         
         if "Area COde" in df.columns:
             df["Area COde"] = df["Area COde"].astype(str).str.zfill(3)
@@ -1227,6 +1275,11 @@ app.layout = html.Div([
                 html.Div([html.I(className="fas fa-users kpi-icon"), html.P("Total Enrolled", className="kpi-label")], className="kpi-header"),
                 html.H3(id="total", className="kpi-value")
             ], className="kpi-card"), xs=12, sm=6, md=4, lg=True),
+
+            dbc.Col(html.Div([
+                html.Div([html.I(className="fas fa-chart-line kpi-icon", style={"color": "#6366f1"}), html.P("Prevalence of Anemia", className="kpi-label")], className="kpi-header"),
+                html.H3(id="prevalence-val", className="kpi-value")
+            ], className="kpi-card"), xs=6, sm=4, md=True),
             
             dbc.Col(html.Div([
                 html.Div([html.I(className="fas fa-check-circle kpi-icon", style={"color": "#10b981"}), html.P("Normal", className="kpi-label")], className="kpi-header"),
@@ -1249,13 +1302,13 @@ app.layout = html.Div([
             ], className="kpi-card"), xs=6, sm=4, md=True),
             
             dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-chart-line kpi-icon", style={"color": "#6366f1"}), html.P("Prevalence", className="kpi-label")], className="kpi-header"),
-                html.H3(id="prevalence-val", className="kpi-value")
+                html.Div([html.I(className="fas fa-droplet kpi-icon", style={"color": "#991b1b"}), html.P("Avg Hb (g/dL)", className="kpi-label")], className="kpi-header"),
+                html.H3(id="avg-hgb", className="kpi-value")
             ], className="kpi-card"), xs=6, sm=4, md=True),
             
             dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-droplet kpi-icon", style={"color": "#991b1b"}), html.P("Avg Hb (g/dL)", className="kpi-label")], className="kpi-header"),
-                html.H3(id="avg-hgb", className="kpi-value")
+                html.Div([html.I(className="fas fa-utensils kpi-icon", style={"color": "#8b5cf6"}), html.P("Dietary", className="kpi-label")], className="kpi-header"),
+                html.H3(id="diet-count", className="kpi-value")
             ], className="kpi-card"), xs=6, sm=4, md=True),
         ], className="mb-4 g-3"),
         
@@ -1281,12 +1334,12 @@ app.layout = html.Div([
             ], xs=12, xl=4)
         ], className="mb-4 g-3"),
         
-        # Comparison Section
+        # Comparison Row
         dbc.Row([
             dbc.Col([
                 html.Div([
-                    html.H5("PSU-wise Anemia Classification", className="graph-title"),
-                    dcc.Loading(dcc.Graph(id="anemia-village-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
+                    html.H5("Nutritional Status Analysis (BMI Distribution)", className="graph-title"),
+                    dcc.Loading(dcc.Graph(id="bmi-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
                 ], className="graph-card")
             ], xs=12, lg=6),
             
@@ -1298,6 +1351,16 @@ app.layout = html.Div([
             ], xs=12, lg=6),
         ], className="mb-4 g-3"),
         
+        # Geospatial/Demographic Row (Renamed for clarity as Anemia Village is here now)
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H5("PSU-wise Anemia Classification", className="graph-title"),
+                    dcc.Loading(dcc.Graph(id="anemia-village-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
+                ], className="graph-card")
+            ], xs=12),
+        ], className="mb-4 g-3"),
+
         # Table Section
         html.Div([
             html.H5("Detailed Beneficiary Records", className="graph-title"),
@@ -1362,10 +1425,12 @@ def refresh_data(_):
         Output("total", "children"), Output("normal-count", "children"),
         Output("moderate-count", "children"), Output("severe-count", "children"),
         Output("mild-count", "children"), Output("avg-hgb", "children"),
+        Output("diet-count", "children"),
         Output("prevalence-val", "children"),
         Output("map", "figure"), Output("benificiery-bar", "figure"),
         Output("anemia-pie", "figure"), Output("anemia-village-bar", "figure"),
         Output("hgb-stats-bar", "figure"),
+        Output("bmi-bar", "figure"),
         Output("table", "data"), Output("table", "columns"),
         Output("location-dropdown", "options"),
         Output("benificiery-dropdown", "options"), Output("anemia-dropdown", "options"),
@@ -1382,9 +1447,18 @@ def refresh_data(_):
     ]
 )
 def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear):
+    try:
+        return internal_update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear)
+    except Exception as e:
+        import traceback
+        print(f"CRITICAL ERROR in update_dashboard: {str(e)}")
+        print(traceback.format_exc())
+        return [0]*8 + [go.Figure()]*6 + [[]]*9
+
+def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear):
     if not stored_dict or "records" not in stored_dict:
-        # Return 21 elements to match the number of outputs
-        return [0]*7 + [go.Figure()]*5 + [[]]*9
+        # Return 22 elements to match the number of outputs
+        return [0]*8 + [go.Figure()]*6 + [[]]*9
     
     records = stored_dict["records"]
     status_msg = stored_dict["status"]
@@ -1392,8 +1466,8 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
     last_upd = stored_dict.get("last_updated", "")
 
     if not records and is_error:
-        # Return 21 elements
-        return [0]*7 + [go.Figure()]*5 + [[]]*9
+        # Return 22 elements
+        return [0]*8 + [go.Figure()]*6 + [[]]*9
 
     df_full = pd.DataFrame(records)
     
@@ -1486,6 +1560,14 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
     mild = (df["anemia_category"] == "mild").sum()
     moderate = (df["anemia_category"] == "moderate").sum()
     severe = (df["anemia_category"] == "severe").sum()
+    # Use Diet1 column as indicated by the user
+    diet_col = "Diet1" if "Diet1" in df.columns else ("Diet" if "Diet" in df.columns else None)
+    if diet_col:
+        # Check specifically for "yes" (case-insensitive) as per user instruction
+        # Blank/NaN values are considered "no"
+        diet_yes = (df[diet_col].astype(str).str.strip().str.lower() == "yes").sum()
+    else:
+        diet_yes = 0
     avg_hgb = round(df["HGB"].mean(), 2) if not df.empty else 0
     prevalence = round(((mild + moderate + severe) / total * 100), 1) if total > 0 else 0
     prevalence_str = f"{prevalence}%"
@@ -1508,7 +1590,7 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
     table_order = [
         "SL.NO", "ID", "enrollment_date", "Area COde", "PSU Name",
         "Name", "Household Name", "Gender", "Benificiery", "Age",
-        "Length", "Height", "Weight", "BMI",
+        "Length", "Height", "Weight", "BMI", "bmi_category",
         "sample_status", "Sample Collected Date", "Collected By",
         "HGB", "anemia_category", "Asha_Worker", "whatsapp", "field_investigator", "Diet", "data_operator"
     ]
@@ -1771,6 +1853,40 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
         showlegend=False,
         bargap=0.2
     )
+    
+    # BMI Distribution Bar Chart
+    bmi_counts = df["bmi_category"].value_counts().reindex(["Underweight", "Normal", "Overweight", "Obese", "Unknown"], fill_value=0)
+    
+    bmi_colors = {
+        "Underweight": "#ef4444", # Red for deficiency
+        "Normal": "#10b981",      # Green
+        "Overweight": "#f59e0b",   # Amber
+        "Obese": "#991b1b",        # Dark Red
+        "Unknown": "#94a3b8"       # Gray
+    }
+    
+    bmi_fig = go.Figure(go.Bar(
+        x=bmi_counts.index,
+        y=bmi_counts.values,
+        marker=dict(
+            color=[bmi_colors.get(cat, "#cbd5e1") for cat in bmi_counts.index],
+            line=dict(color="#1e293b", width=1.5)
+        ),
+        text=bmi_counts.values,
+        textposition="auto",
+        name="Beneficiaries",
+        opacity=0.9
+    ))
+    
+    bmi_fig.update_layout(
+        margin=dict(t=30, b=50, l=50, r=20),
+        xaxis=dict(title="BMI Category (WHO Guidelines)", showgrid=False, tickfont=dict(color="#64748b")),
+        yaxis=dict(title="Count", showgrid=True, gridcolor="#f1f5f9", tickfont=dict(color="#64748b")),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
+        height=450,
+        bargap=0.4
+    )
     # ----------------------------------------------
 
     # Urgent Alerts (Severe Anemia)
@@ -1810,7 +1926,8 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
         "HGB": "HGB (g/dL)",
         "Length": "Length (Age < 2 years)",
         "Height": "Height (cm)",
-        "Weight": "Weight (kg)"
+        "Weight": "Weight (kg)",
+        "bmi_category": "Nutritional Status"
     }
     
     table_cols = [
@@ -1823,7 +1940,8 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
 
     print(f">>> RETURNING LOCATION: {location}")
     print(f">>> CALLBACK END: {triggered_id}\n")
-    return (total, normal_kpi, moderate_kpi, severe_kpi, mild_kpi, avg_hgb, prevalence_str, map_fig, benif_bar, anemia_pie, anemia_village_bar, hgb_stats_fig, df_table.to_dict("records"), table_cols, loc_opts, benif_opts, anemia_opts, location, benificiery, anemia, urgent_list)
+    return (total, normal_kpi, moderate_kpi, severe_kpi, mild_kpi, avg_hgb, diet_yes, prevalence_str, map_fig, benif_bar, anemia_pie, anemia_village_bar, hgb_stats_fig, bmi_fig, df_table.to_dict("records"), table_cols, loc_opts, benif_opts, anemia_opts, location, benificiery, anemia, urgent_list)
+
 
 # =========================
 # EXPORT CALLBACKS
@@ -1836,46 +1954,50 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
     prevent_initial_call=True
 )
 def export_data(n_excel, n_csv, stored_dict, location, benif, anemia):
-    if not callback_context.triggered:
-        return no_update
+    try:
+        if not callback_context.triggered:
+            return no_update
+            
+        if not stored_dict or "records" not in stored_dict:
+            print("DEBUG: Export failed - No data in stored_dict")
+            return no_update
         
-    if not stored_dict or "records" not in stored_dict:
-        print("DEBUG: Export failed - No data in stored_dict")
+        print(f"DEBUG: Export triggered. Filters - Loc: {location}, Benif: {benif}, Anemia: {anemia}")
+        
+        df = pd.DataFrame(stored_dict["records"])
+        
+        # Robust Type Enforcement for Filters
+        location = [location] if isinstance(location, str) else (location or [])
+        benif = [benif] if isinstance(benif, str) else (benif or [])
+        anemia = [anemia] if isinstance(anemia, str) else (anemia or [])
+        
+        # Apply filters
+        if location:
+            df = df[df["Location"].isin(location)]
+        if benif:
+            df = df[df["Benificiery"].isin(benif)]
+        if anemia:
+            anemia_lower = [str(x).lower() for x in anemia]
+            df = df[df["anemia_category"].str.lower().isin(anemia_lower)]
+
+        # Format dates for export (DD/MM/YYYY)
+        date_cols = ["enrollment_date", "Sample Collected Date"]
+        for col in date_cols:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%d/%m/%Y').fillna("")
+
+        ctx = callback_context
+        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+        print(f"DEBUG: Exporting {len(df)} records. Trigger: {trigger}")
+
+        if trigger == "btn-csv":
+            return dcc.send_data_frame(df.to_csv, "prakash_data_export.csv", index=False)
+        else:
+            # Excel requires openpyxl
+            return dcc.send_data_frame(df.to_excel, "prakash_data_export.xlsx", index=False, engine="openpyxl")
+    except Exception as e:
+        print(f"CRITICAL ERROR in export_data: {e}")
         return no_update
-    
-    print(f"DEBUG: Export triggered. Filters - Loc: {location}, Benif: {benif}, Anemia: {anemia}")
-    
-    df = pd.DataFrame(stored_dict["records"])
-    
-    # Robust Type Enforcement for Filters
-    location = [location] if isinstance(location, str) else (location or [])
-    benif = [benif] if isinstance(benif, str) else (benif or [])
-    anemia = [anemia] if isinstance(anemia, str) else (anemia or [])
-    
-    # Apply filters
-    if location:
-        df = df[df["Location"].isin(location)]
-    if benif:
-        df = df[df["Benificiery"].isin(benif)]
-    if anemia:
-        anemia_lower = [str(x).lower() for x in anemia]
-        df = df[df["anemia_category"].str.lower().isin(anemia_lower)]
-
-    # Format dates for export (DD/MM/YYYY)
-    date_cols = ["enrollment_date", "Sample Collected Date"]
-    for col in date_cols:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%d/%m/%Y').fillna("")
-
-    ctx = callback_context
-    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-    print(f"DEBUG: Exporting {len(df)} records. Trigger: {trigger}")
-
-    if trigger == "btn-csv":
-        return dcc.send_data_frame(df.to_csv, "prakash_data_export.csv", index=False)
-    else:
-        # Excel requires openpyxl
-        return dcc.send_data_frame(df.to_excel, "prakash_data_export.xlsx", index=False, engine="openpyxl")
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8060)
