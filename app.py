@@ -17,19 +17,38 @@ import os
 from who_standards import calculate_bmi_z_score, classify_who_z_score
 
 # =========================
+# GLOBAL CONSTANTS
+# =========================
+BENEFICIARY_MAP = {
+    2: "Pregnant Women",
+    3: "Children 5-59 Months",
+    4: "Children Aged 5-9 Years",
+    5: "Adolescent Girls 10-19 Years",
+    6: "Adolescent Boys 10-19 Years",
+    7: "Women Of Reproductive Age"
+}
+anemia_list = ["normal", "mild", "moderate", "severe", "incomplete"]
+
+# =========================
 # DASH INIT
 # =========================
-app = dash.Dash(__name__, external_stylesheets=[
-    dbc.themes.BOOTSTRAP,
-    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-])
+app = dash.Dash(__name__, 
+                external_stylesheets=[
+                    dbc.themes.BOOTSTRAP,
+                    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+                ], 
+                suppress_callback_exceptions=True,
+                eager_loading=True)
+app.scripts.config.serve_locally = True
+app.css.config.serve_locally = True
 server = app.server
 
-@server.route('/images.png')
-def serve_image():
-    # Use the directory where app.py is located
-    root_dir = os.path.dirname(os.path.abspath(__file__))
-    return flask.send_from_directory(root_dir, 'images.png')
+@server.route('/<filename>')
+def serve_assets(filename):
+    if filename in ['images.png', 'main_logo.svg', 'government-of-karnataka.webp']:
+        root_dir = os.path.dirname(os.path.abspath(__file__))
+        return flask.send_from_directory(root_dir, filename)
+    return flask.abort(404)
 
 # =========================
 # EMBEDDED CSS
@@ -47,7 +66,7 @@ CSS_STYLES = """
     --text-muted: #64748b;
     --border-color: #e2e8f0;
     --sidebar-width: 280px;
-    --top-bar-height: 90px;
+    --top-bar-height: 120px;
     --sidebar-mobile-width: 100%;
     --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -473,6 +492,32 @@ body {
     background-color: #ffffff !important;
 }
 
+.nav-buttons {
+    display: flex;
+    gap: 12px;
+}
+
+.nav-btn {
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: var(--transition);
+    text-decoration: none !important;
+    border: 1px solid transparent;
+}
+
+.nav-btn-test { color: #4f46e5; border-color: #e2e8f0; background: #ffffff; }
+.nav-btn-treat { color: #0d9488; border-color: #ccfbf1; background: #f0fdfa; }
+.nav-btn-track { color: #ffffff; background: #4f46e5; }
+
+.nav-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.nav-btn-track:hover { background: #4338ca; }
+
 /* Urgent Alerts Styling */
 .urgent-list {
     max-height: 200px;
@@ -525,16 +570,33 @@ app.index_string = f'''
 DATA_SOURCE_URL = "https://script.google.com/macros/s/AKfycbzazlpEvo3qo2pVhp0fvcpUrlcyR9QRE2SYED5fu-5Og5oVBHZ-EIbaOR-VNCwEIC6JdQ/exec" 
 # Paste your deployed Google Apps Script Web App URL here to enable write-back
 EXCEL_WRITE_URL = "https://script.google.com/macros/s/AKfycbyfwRVnmXLB8qQt31kIGBmC1NxZ_atYNnM4h-M0sREFpIJJ5au8X9uu8Olwch80XRNpqQ/exec" 
-LAST_SYNC_CACHE = {} # To prevent redundant syncs {ID: row_signature}
+LAST_SYNC_CACHE = {} 
+CACHE_FILE = "sync_cache.json"
 
-BENEFICIARY_MAP = {
-    2: "Pregnant Women",
-    3: "Children 5-59 Months",
-    4: "Children Aged 5-9 Years",
-    5: "Adolescent Girls 10-19 Years",
-    6: "Adolescent Boys 10-19 Years",
-    7: "Women Of Reproductive Age"
-}
+def load_sync_cache():
+    global LAST_SYNC_CACHE
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r") as f:
+                LAST_SYNC_CACHE = json.load(f)
+            # print(f"DEBUG: Loaded {len(LAST_SYNC_CACHE)} records from sync cache.")
+        except Exception as e:
+            print(f"DEBUG: Failed to load sync cache: {e}")
+            LAST_SYNC_CACHE = {}
+    else:
+        LAST_SYNC_CACHE = {}
+
+def save_sync_cache():
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(LAST_SYNC_CACHE, f)
+    except Exception as e:
+        print(f"DEBUG: Failed to save sync cache: {e}")
+
+# Initial load
+load_sync_cache()
+
+# BENEFICIARY_MAP moved to GLOBAL CONSTANTS at top of file
 
 def parse_age(age_val):
     if pd.isna(age_val) or age_val == "":
@@ -739,7 +801,7 @@ def classify_anemia_who(hgb, age, gender, beneficiary):
                     return "moderate"
                 else:
                     return "severe"
-            # Unknown gender - use female thresholds (more conservative)
+            # Missing gender - use female thresholds (more conservative)
             else:
                 if hgb >= 12.0:
                     return "normal"
@@ -767,7 +829,9 @@ def sync_data_to_sheets(df):
     sync_cols = [
         "SL.NO", "ID", "enrollment_date", "Area COde", "PSU Name", 
         "Name", "Gender", "Benificiery", "HGB", "anemia_category",
-        "Length", "Height", "Weight", "Age", "whatsapp"
+        "Length", "Height", "Weight", "Age", "whatsapp",
+        "Diet 1", "Diet 2", "field_investigator", "Asha_Worker", "data_operator",
+        "Sample Collected Date", "bmi_category", "BMI", "Email", "Status"
     ]
     
     # Identify which columns actually exist in the current dataframe
@@ -794,6 +858,11 @@ def sync_data_to_sheets(df):
         # print("DEBUG: No changes detected at row level. Skipping background sync.")
         return
     
+    # Update cache locally (we'll commit to file if the request succeeds)
+    # Actually, it's safer to update internal cache only after success, but we prepared temp_cache
+    # temp_cache already has the updates.
+
+    
     print(f"DEBUG: Found {len(diff_rows)} new/updated records to sync to Sheets.")
 
     try:
@@ -817,6 +886,7 @@ def sync_data_to_sheets(df):
             print(f"DEBUG: Data sync successful: {r.json().get('message') if r.text.startswith('{') else 'OK'}")
             # Update cache only after successful delivery
             LAST_SYNC_CACHE = temp_cache
+            save_sync_cache()
     except Exception as e:
         import traceback
         print(f"DEBUG: Data sync exception trace: {traceback.format_exc()}")
@@ -856,8 +926,8 @@ def load_data():
             "SL.NO", "ID", "enrollment_date", "Area COde", "PSU Name",
             "Name", "Household Name", "Gender", "Benificiery", "DOB", "Age",
             "sample_status", "Sample Collected Date", "Collected By",
-            "HGB", "anemia_category", "field_investigator", "Diet", "Diet1", "data_operator",
-            "Asha_Worker", "Aasha_Contact", "Length", "Height", "Weight"
+            "HGB", "anemia_category", "field_investigator", "Diet", "Diet1", "Diet2", "data_operator",
+            "Asha_Worker", "Aasha_Contact", "Length", "Height", "Weight", "Email", "Status"
         ]
         df = df[[c for c in required_cols if c in df.columns]]
 
@@ -873,6 +943,14 @@ def load_data():
         for col in ["Length", "Height", "Weight"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+                
+        # Rename Diet columns for clarity: Diet -> Diet 1, Diet1 -> Diet 2
+        diet_rename = {}
+        if "Diet" in df.columns: diet_rename["Diet"] = "Diet 1"
+        if "Diet1" in df.columns: diet_rename["Diet1"] = "Diet 2"
+        if "Diet2" in df.columns: diet_rename["Diet2"] = "Diet 3"
+        if diet_rename:
+            df = df.rename(columns=diet_rename)
 
         # Calculate BMI: Weight(kg) / [Height(m)]²
         # Row-level fallback: Use Height if available, otherwise use Length
@@ -891,14 +969,21 @@ def load_data():
         def classify_nutritional_status(row):
             bmi = row.get("BMI")
             age_y = row.get("Age")
+            beneficiary = str(row.get("Benificiery", "")).lower()
             gender_raw = str(row.get("Gender", "")).lower().strip()
             
-            if pd.isna(bmi) or bmi is None: return "Unknown"
+            # Exemption: If pregnant and BMI >= 30, classify as Obese (pre-pregnancy proxy)
+            if "pregnant" in beneficiary or "(pw)" in beneficiary:
+                if not pd.isna(bmi) and bmi >= 30.0:
+                    return "Obese"
+                return "Pregnancy"
+                
+            if pd.isna(bmi) or bmi is None: return "Missing"
             
             try:
                 val = float(bmi)
             except:
-                return "Unknown"
+                return "Missing"
 
             # Map Gender to WHO 'boys'/'girls'
             gender_who = None
@@ -948,6 +1033,7 @@ def load_data():
             if mask.any():
                 # Ensure compatibility by removing timezones (tz-naive)
                 try:
+                    # Fix: Ensure ref_date is also timezone-naive to match localized(None) DOB
                     ref_dt_naive = pd.to_datetime(ref_date[mask]).dt.tz_localize(None)
                     dob_dt_naive = pd.to_datetime(df.loc[mask, "DOB"]).dt.tz_localize(None)
                     diff = (ref_dt_naive - dob_dt_naive).dt.days
@@ -968,7 +1054,7 @@ def load_data():
         elif "PSU Name" in df.columns:
             df["Location"] = df["PSU Name"].astype(str)
         else:
-            df["Location"] = "Unknown"
+            df["Location"] = "Missing"
 
         if "anemia_category" in df.columns:
             df["anemia_category"] = df["anemia_category"].astype(str).str.strip()
@@ -1043,40 +1129,40 @@ def area_coordinates():
         'Kunikera': {'lat': 15.2832, 'lon': 76.2142},
         'Ojanahalli': {'lat': 15.3856, 'lon': 76.1472},
         'Bannikoppa': {'lat': 15.3877, 'lon': 75.9420},
-        'Tadkal': {'lat': 15.3507, 'lon': 76.1554},
+        'Tadkal': {'lat': 15.3688, 'lon': 75.9812},
         'Hulegudda': {'lat': 15.6235, 'lon': 76.1146},
         'Konasagar': {'lat': 15.6916, 'lon': 76.1030},
-        'Kawalbodur': {'lat': 15.8267, 'lon': 76.1744},
-        'Balutagi': {'lat': 15.8627, 'lon': 76.2653},
-        'HireGonnagar': {'lat': 15.8096, 'lon': 75.9535},
+        'Kawalbodur': {'lat': 15.8318, 'lon': 76.1871},
+        'Balutagi': {'lat': 15.87338865573784, 'lon': 76.25665534853232},
+        'HireGonnagar': {'lat': 15.8092, 'lon': 75.9539},
         'Anegundi': {'lat': 15.3507, 'lon': 76.4925},
-        'Kilarhatti': {'lat': 15.8107, 'lon': 76.3994},
-        'Challur': {'lat': 15.6000, 'lon': 76.5833},
-        'Marlanahalli': {'lat': 15.5740, 'lon': 76.6499},
-        'Gouripur': {'lat': 15.6188, 'lon': 76.3550},
+        'Kilarhatti': {'lat': 15.8411, 'lon': 76.4359},
+        'Challur': {'lat': 15.6014, 'lon': 76.5943},
+        'Marlanahalli': {'lat': 15.5771, 'lon': 76.6490},
+        'Gouripur': {'lat': 15.6187547, 'lon': 76.35504569999999},
         'Hatti': {'lat': 15.2117, 'lon': 75.9350},
-        'Komlapur': {'lat': 15.350708, 'lon': 76.155434},
-        'Chikwankal Kunta': {'lat': 15.5828, 'lon': 76.1852},
-        'Hire Wankal Kunta': {'lat': 15.5972, 'lon': 76.1931},
-        'Talkere': {'lat': 15.5471, 'lon': 76.1555},
-        'Ningalbandi': {'lat': 15.6881, 'lon': 76.2235},
-        'Badimnhal': {'lat': 15.7197, 'lon': 76.1432},
-        'Venkatapur': {'lat': 15.8239, 'lon': 76.2081},
-        'Garjanhal': {'lat': 15.7062, 'lon': 76.0681},
-        'Teggihal': {'lat': 15.6836, 'lon': 76.0441},
-        'Mallapur': {'lat': 15.7481, 'lon': 76.2361},
-        'Rampur': {'lat': 15.3934, 'lon': 76.1415},
-        'Hagedal': {'lat': 15.6562, 'lon': 76.0315},
-        'Basrihal': {'lat': 15.6031, 'lon': 75.9521},
-        'Chikka Madinal': {'lat': 15.6621, 'lon': 75.9876},
-        'Wadganhal': {'lat': 15.6214, 'lon': 75.9562},
-        'Hirebommanahal': {'lat': 15.6421, 'lon': 76.0214},
-        'Hiresulikeri': {'lat': 15.6791, 'lon': 76.1721},
-        'Jinnapur': {'lat': 15.5342, 'lon': 75.9731},
-        'Belgatti': {'lat': 15.4851, 'lon': 75.8921},
-        'Kawaloor': {'lat': 15.3512, 'lon': 75.9921},
-        'Kesor': {'lat': 15.4021, 'lon': 76.5467},
-        'Gangawati (CMC+OG) WARD No- 0005': {'lat': 15.4350, 'lon': 76.5330},
+        'Komalapur': {'lat': 15.3405, 'lon':76.0215},
+        'Chikwankal Kunta': {'lat': 15.629761351168723, 'lon':76.23304865792784},
+        'Hire Wankal Kunta': {'lat': 15.646960083050104, 'lon':76.238318366376871},
+        'Talkere': {'lat': 15.645466597713694, 'lon': 76.26477078258641},
+        'Ningalbandi': {'lat': 15.671063605028287, 'lon': 76.13794513593994},
+        'Badimnhal': {'lat': 15.839823262484467, 'lon': 75.95503149946924},
+        'Venkatapur': {'lat': 15.858511392991407, 'lon': 75.97308023163832},
+        'Garjanhal': {'lat': 15.833697603912572, 'lon': 76.41468762354576},
+        'Teggihal': {'lat': 15.849556310249351, 'lon': 76.27912911541603},
+        'Mallapur': {'lat': 15.3933, 'lon': 76.4867},
+        'Rampura': {'lat': 15.3822, 'lon': 76.4816},
+        'Hagedal': {'lat': 15.590418925207551,  'lon':76.59839346965396},
+        'Basrihal': {'lat': 15.595505073968516, 'lon':76.38104641401482},
+        'Chikka Madinal': {'lat': 15.523496092485985, 'lon': 76.3778821765826},
+        'Wadganhal': {'lat': 15.349168758650613, 'lon': 76.0804548913306},
+        'Hirebommanahal': {'lat': 15.597423828789088 , 'lon': 76.2735258247831},
+        'Hiresulikeri': {'lat': 15.52797030965004,'lon':  76.26075289964011 },
+        'Jinnapur': {'lat': 15.490613192523476,'lon':  76.25717388261322},
+        'Belgatti': {'lat': 15.213735760897155, 'lon': 75.9243389399449 },
+        'Kawaloor': {'lat': 15.296976608396339, 'lon': 75.93461733961688},
+        'Kesoor': {'lat': 15.872788521335098, 'lon': 76.19874347785046 },
+        'Gangawati (CMC+OG) WARD No- 0005': {'lat': 15.424340577107621, 'lon': 76.53100417165172},
         'Gangawati (CMC+OG) WARD No- 0009': {'lat': 15.4280, 'lon': 76.5250},
         'Gangawati (CMC+OG) WARD No- 0015': {'lat': 15.4330, 'lon': 76.5350},
         'Koppal (CMC) WARD No-0008': {'lat': 15.3530, 'lon': 76.1580},
@@ -1181,15 +1267,385 @@ def create_map(df):
         map_style="open-street-map", map_center={"lat": 15.6, "lon": 76.15},
         map_zoom=8.3, margin=dict(l=0, r=0, t=0, b=0),
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255, 255, 255, 0.7)"),
-        hoverlabel=dict(bgcolor="white", font_size=12, font_family="-apple-system, BlinkMacSystemFont, sans-serif")
+        hoverlabel=dict(bgcolor="white", font_size=12, font_family="-apple-system, BlinkMacSystemFont, sans-serif"),
+        uirevision=True # Preserve zoom and pan state
     )
     return fig
+
+def create_treat_map(df):
+    fig = go.Figure()
+    if df.empty:
+        fig.add_annotation(text="No data available", showarrow=False)
+        return fig
+        
+    coords = area_coordinates()
+    df = df.copy()
+    if "PSU Name" in df.columns:
+        df["lat"] = df["PSU Name"].astype(str).str.strip().map(lambda x: coords.get(x, {}).get("lat"))
+        df["lon"] = df["PSU Name"].astype(str).str.strip().map(lambda x: coords.get(x, {}).get("lon"))
+    
+    map_df = df.dropna(subset=["lat", "lon"])
+    
+    # Calculate counts per PSU for treatment focus
+    # We need: Asha Worker names, and Anemic counts (Mild, Moderate, Severe)
+    treat_data = []
+    
+    # PSU-wise aggregates
+    for psu_name, psu_group in map_df.groupby("PSU Name"):
+        ashas = ", ".join(psu_group["Asha_Worker"].dropna().unique()) if "Asha_Worker" in psu_group.columns else "Missing"
+        
+        # Anemia breakdown
+        counts = psu_group["anemia_category"].str.lower().value_counts()
+        mild = counts.get("mild", 0)
+        moderate = counts.get("moderate", 0)
+        severe = counts.get("severe", 0)
+        total_anemic = mild + moderate + severe
+        
+        if total_anemic > 0:
+            color = "#ef4444" if severe > 0 else ("#f97316" if moderate > 0 else "#f59e0b")
+            status = f"<b>{total_anemic}</b> Anemic"
+        else:
+            color = "#10b981"
+            status = "No Anemia"
+            
+        hover_text = (
+            f"<b>{psu_name}</b><br><br>"
+            f"Asha Worker: <b>{ashas}</b><br><br>"
+            f"<b>Anemia Breakdown:</b><br>"
+            f"• Severe: <b>{severe}</b><br>"
+            f"• Moderate: <b>{moderate}</b><br>"
+            f"• Mild: <b>{mild}</b><br>"
+            f"• Normal: <b>{counts.get('normal', 0)}</b>"
+        )
+        
+        v_coord = coords.get(psu_name, {})
+        if v_coord:
+            treat_data.append({
+                "name": psu_name, "lat": v_coord["lat"], "lon": v_coord["lon"],
+                "color": color, "hover": hover_text, "size": 12 + (total_anemic * 0.5)
+            })
+
+    if treat_data:
+        t_df = pd.DataFrame(treat_data)
+        fig.add_trace(go.Scattermap(
+            lat=t_df["lat"], lon=t_df["lon"], mode="markers",
+            marker=dict(size=t_df["size"], color=t_df["color"], opacity=0.8),
+            name="Urgent PSUs",
+            text=t_df["name"],
+            hovertemplate="%{customdata}<extra></extra>",
+            customdata=t_df["hover"]
+        ))
+
+    # Add Geospatial boundary
+    try:
+        with open("koppal_district_official.geojson", "r") as f:
+            geojson_data = json.load(f)
+        fig.add_trace(go.Choroplethmap(
+            geojson=geojson_data, locations=["Koppal"], featureidkey="properties.district",
+            z=[1], colorscale=[[0, "rgba(52, 152, 219, 0.05)"], [1, "rgba(52, 152, 219, 0.05)"]],
+            marker_line_width=1, marker_line_color="#2980b9", marker_opacity=0.3,
+            showscale=False, name="Boundary", hoverinfo="skip"
+        ))
+    except: pass
+
+    fig.update_layout(
+        map_style="open-street-map", map_center={"lat": 15.6, "lon": 76.15},
+        map_zoom=8.3, margin=dict(l=0, r=0, t=0, b=0),
+        uirevision=True
+    )
+    return fig
+
+def get_treat_layout():
+    return html.Div([
+        # Sidebar with Filters (Same as Dashboard for consistency)
+        html.Div([
+            html.Div([
+                html.P("Treatment & Follow-up Dashboard", 
+                       style={"fontSize": "0.75rem", "fontWeight": "700", "color": "#000000", "margin": "0", "letterSpacing": "0.05em", "textTransform": "uppercase"}),
+                html.P("Koppal, Karnataka", 
+                       style={"fontSize": "0.7rem", "color": "#000000", "margin": "2px 0 0 0"})
+            ], style={"padding": "0 0 20px 0", "marginBottom": "10px", "borderBottom": "1px solid #f1f5f9"}),
+            
+            html.Div([
+                html.Div([
+                    html.Label("Locality", className="sidebar-label"),
+                    dcc.Dropdown(id="location-dropdown", options=[], multi=True, value=[], placeholder="All Locations"),
+                ], className="filter-group"),
+                
+                html.Div([
+                    html.Label("Beneficiary Type", className="sidebar-label"),
+                    dcc.Dropdown(id="benificiery-dropdown", options=[], multi=True, value=[], placeholder="All Beneficiaries"),
+                ], className="filter-group"),
+
+                html.Div([
+                    html.Label("Anemia Filter", className="sidebar-label"),
+                    dcc.Dropdown(id="anemia-dropdown", options=[{"label": x.capitalize(), "value": x} for x in anemia_list], multi=True, value=[], placeholder="All Categories"),
+                ], className="filter-group"),
+
+                dbc.Button("Clear All Filters", id="btn-clear", color="secondary", outline=True, size="sm", className="w-100 mb-4"),
+
+                html.Div([
+                    html.Label("Urgent Follow-up Subjects", className="sidebar-label", style={"color": "#ef4444"}),
+                    html.Div(id="urgent-alerts-list", className="urgent-list"),
+                ], className="filter-group", id="urgent-section"),
+            ], style={"flex": "1"}),
+        ], id="sidebar", className="sidebar"),
+
+        # Main Content
+        html.Div([
+            # Phase Marker
+            html.Div([
+                html.Span([html.I(className="fas fa-tag me-2"), "Baseline 1"], className="glowing-badge", style={"fontSize": "0.75rem", "padding": "4px 12px"})
+            ], style={"textAlign": "left", "marginBottom": "10px"}),
+
+            # KPI Row for Treat Page (Moved to Top)
+            dbc.Row([
+                # KPI Section (Styled to match Test page)
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-users kpi-icon"), html.P("Total Enrollment", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="total", className="kpi-value")
+                ], className="kpi-card"), xs=12, sm=6, md=4, lg=True),
+
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-exclamation-triangle kpi-icon", style={"color": "#ef4444"}), html.P("Severe Anemia", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="severe-count", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-exclamation-circle kpi-icon", style={"color": "#f97316"}), html.P("Moderate Anemia", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="moderate-count", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-droplet kpi-icon", style={"color": "#991b1b"}), html.P("Avg Hb (g/dL)", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="avg-hgb", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+            ], className="mb-4 g-3"),
+
+            html.Div([
+                html.H4("Geospatial High-Risk Distribution", style={"marginBottom": "20px", "fontWeight": "700"}),
+                html.P("Hover over markers to see assigned Asha Workers and patient breakdown.", style={"color": "#64748b", "fontSize": "0.9rem"}),
+                dcc.Graph(id="map", config={"responsive": True}, style=MAP_CARD_STYLE),
+            ], className="graph-card", style={"padding": "30px", "marginBottom": "24px"}),
+            
+            # Secondary charts (Hidden to simplify page as requested)
+            html.Div([
+                dcc.Graph(id="anemia-pie", style={"display": "none"}),
+                dcc.Graph(id="benificiery-bar", style={"display": "none"}),
+                html.Div(id="prevalence-val", style={"display": "none"}),
+                html.Div(id="normal-count", style={"display": "none"}),
+                html.Div(id="mild-count", style={"display": "none"}),
+                html.Div(id="diet-count", style={"display": "none"}),
+            ], style={"display": "none"}),
+
+            # Other required charts
+            dbc.Row([
+                dbc.Col(dcc.Graph(id="bmi-bar", style={"display": "none"}), width=4),
+                dbc.Col(dcc.Graph(id="hgb-stats-bar", style={"display": "none"}), width=4),
+                dbc.Col(dcc.Graph(id="anemia-village-bar", style={"display": "none"}), width=4),
+            ]),
+
+            html.Div([
+                html.H5("Detailed Records", className="graph-title"),
+                dash_table.DataTable(id="table", style_header={"display": "none"})
+            ], style={"display": "none"}),
+            
+            get_footer()
+        ], id="main-content", className="main-content")
+    ])
+
+def get_footer():
+    return html.Footer([
+        html.Hr(style={"margin": "40px 0 20px 0", "opacity": "0.1"}),
+        html.Div([
+            html.P("Copyright © 2026 ICMR CAR MEDTECH LAB | St Johns's Research Institute, Bangalore",
+                   style={"fontSize": "0.75rem", "color": "#64748b", "textAlign": "center", "marginBottom": "20px"})
+        ], className="footer-content")
+    ], className="dashboard-footer")
 
 # Custom styles for the layout
 CARD_STYLE = {"height": "350px"}
 MAP_CARD_STYLE = {"height": "645px"}
 
+def get_dashboard_layout():
+    return html.Div([
+        html.Div([
+            # Sidebar Header (Context Label)
+            html.Div([
+                html.P("Real-time Anaemia Monitoring Dashboard", 
+                       style={"fontSize": "0.75rem", "fontWeight": "700", "color": "#000000", "margin": "0", "letterSpacing": "0.05em", "textTransform": "uppercase"}),
+                html.P("Koppal, Karnataka", 
+                       style={"fontSize": "0.7rem", "color": "#000000", "margin": "2px 0 0 0"})
+            ], style={"padding": "0 0 20px 0", "marginBottom": "10px", "borderBottom": "1px solid #f1f5f9"}),
+            
+            html.Div([
+                # Location Selection (Always Visible)
+                html.Div([
+                    html.Label("Location Selection", className="sidebar-label"),
+                    dcc.Dropdown(id="location-dropdown", options=[], multi=True, value=[], placeholder="All Locations"),
+                ], className="filter-group"),
+                
+                # Filter Groups (Reverted to flat layout)
+                html.Div([
+                    html.Label("Beneficiary Type", className="sidebar-label"),
+                    dcc.Dropdown(id="benificiery-dropdown", options=[], multi=True, value=[], placeholder="All Beneficiaries"),
+                ], className="filter-group"),
+                
+                html.Div([
+                    html.Label("Anemia Status", className="sidebar-label"),
+                    dcc.Dropdown(id="anemia-dropdown", options=[{"label": x.capitalize(), "value": x} for x in anemia_list], multi=True, value=[], placeholder="All Categories"),
+                ], className="filter-group"),
+
+                dbc.Button("Clear All Filters", 
+                           id="btn-clear", color="secondary", outline=True, size="sm", 
+                           className="w-100 mb-4", style={"fontSize": "0.75rem", "borderRadius": "8px"}),
+
+                html.Div([
+                    html.Label("Management Tools", className="sidebar-label"),
+                    dbc.ButtonGroup([
+                        dbc.Button([html.I(className="fas fa-file-excel me-2"), "Excel"], id="btn-excel", color="success", outline=True, size="sm", style={"fontSize": "0.7rem"}),
+                        dbc.Button([html.I(className="fas fa-file-csv me-2"), "CSV"], id="btn-csv", color="primary", outline=True, size="sm", style={"fontSize": "0.7rem"}),
+                    ], className="w-100"),
+                ], className="filter-group"),
+
+                # Placeholder for urgent alerts to satisfy callback output in multi-page environment
+                html.Div(id="urgent-alerts-list", style={"display": "none"}),
+            ], style={"flex": "1"}),
+            
+            html.Div([
+                html.Div([
+                    html.Div(className="status-dot"),
+                    html.Span("Live Data Connection")
+                ], className="status-badge")
+            ], style={"marginTop": "auto", "padding": "10px 0"})
+        ], id="sidebar", className="sidebar"),
+        
+        # Main Content
+        html.Div([
+            # Phase Marker
+            html.Div([
+                html.Span([html.I(className="fas fa-tag me-2"), "Baseline 1"], className="glowing-badge", style={"fontSize": "0.75rem", "padding": "4px 12px"})
+            ], style={"textAlign": "left", "marginBottom": "10px"}),
+
+            # Main Dashboard Grid
+            dbc.Row([
+                # KPI Section (Moved up to top row since branding is now in fixed top bar)
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-users kpi-icon"), html.P("Total Enrolled", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="total", className="kpi-value")
+                ], className="kpi-card"), xs=12, sm=6, md=4, lg=True),
+
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-chart-line kpi-icon", style={"color": "#6366f1"}), html.P("Prevalence of Anemia", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="prevalence-val", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-check-circle kpi-icon", style={"color": "#10b981"}), html.P("Normal", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="normal-count", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-info-circle kpi-icon", style={"color": "#f59e0b"}), html.P("Mild", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="mild-count", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-exclamation-circle kpi-icon", style={"color": "#f97316"}), html.P("Moderate", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="moderate-count", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-exclamation-triangle kpi-icon", style={"color": "#ef4444"}), html.P("Severe", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="severe-count", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-droplet kpi-icon", style={"color": "#991b1b"}), html.P("Avg Hb (g/dL)", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="avg-hgb", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+                
+                dbc.Col(html.Div([
+                    html.Div([html.I(className="fas fa-utensils kpi-icon", style={"color": "#8b5cf6"}), html.P("Dietary", className="kpi-label")], className="kpi-header"),
+                    html.H3(id="diet-count", className="kpi-value")
+                ], className="kpi-card"), xs=6, sm=4, md=True),
+            ], className="mb-4 g-3"),
+            
+            # Grid Section
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H5("Geospatial Distribution", className="graph-title"),
+                        dcc.Graph(id="map", config={"responsive": True, "displayModeBar": False}, style=MAP_CARD_STYLE),
+                    ], className="graph-card")
+                ], xs=12, xl=8),
+                
+                dbc.Col([
+                    html.Div([
+                        html.H5("Case Classification", className="graph-title"),
+                        dcc.Graph(id="anemia-pie", config={"responsive": True, "displayModeBar": False}, style={"height": "265px"}),
+                    ], className="graph-card", style={"marginBottom": "24px"}),
+                    
+                    html.Div([
+                        html.H5("Beneficiary Distribution", className="graph-title"),
+                        dcc.Graph(id="benificiery-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "265px"}),
+                    ], className="graph-card")
+                ], xs=12, xl=4)
+            ], className="mb-4 g-3"),
+            
+            # Comparison Row
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H5("Nutritional Status Analysis (BMI Distribution)", className="graph-title"),
+                        dcc.Graph(id="bmi-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}),
+                    ], className="graph-card")
+                ], xs=12, lg=6),
+                
+                dbc.Col([
+                    html.Div([
+                        html.H5("PSU-wise Hemoglobin Analysis (Mean & SD)", className="graph-title"),
+                        dcc.Graph(id="hgb-stats-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}),
+                    ], className="graph-card")
+                ], xs=12, lg=6),
+            ], className="mb-4 g-3"),
+            
+            # Geospatial/Demographic Row (Renamed for clarity as Anemia Village is here now)
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H5("PSU-wise Anemia Classification", className="graph-title"),
+                        dcc.Graph(id="anemia-village-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}),
+                    ], className="graph-card")
+                ], xs=12),
+            ], className="mb-4 g-3"),
+
+            # Table Section
+            html.Div([
+                html.H5("Detailed Beneficiary Records", className="graph-title"),
+                dash_table.DataTable(
+                    id="table", page_size=15, filter_action="native", sort_action="native",
+                    style_table={"overflowX": "auto", "minWidth": "100%"}, 
+                    style_cell={"padding": "12px", "textAlign": "left", "fontFamily": "-apple-system, BlinkMacSystemFont, sans-serif", "fontSize": "0.875rem", "minWidth": "150px"},
+                    style_header={"fontWeight": "600", "backgroundColor": "#f8fafc", "color": "#475569", "borderBottom": "2px solid #e2e8f0"},
+                    fixed_rows={'headers': True},
+                    style_data_conditional=[
+                        {'if': {'filter_query': '{anemia_category} = "Normal"'}, 'backgroundColor': '#f0fdf4', 'color': '#166534'},
+                        {'if': {'filter_query': '{anemia_category} = "Mild"'}, 'backgroundColor': '#fffbeb', 'color': '#92400e'},
+                        {'if': {'filter_query': '{anemia_category} = "Moderate"'}, 'backgroundColor': '#fff7ed', 'color': '#9a3412'},
+                        {'if': {'filter_query': '{anemia_category} = "Severe"'}, 'backgroundColor': '#fef2f2', 'color': '#991b1b'},
+                        {'if': {'filter_query': '{anemia_category} = "Incomplete"'}, 'backgroundColor': '#f8fafc', 'color': '#475569'},
+                    ]
+                )
+            ], className="graph-card"),
+            
+            get_footer()
+        ], id="main-content", className="main-content")
+    ])
+
+
 app.layout = html.Div([
+    dcc.Location(id="url", refresh=False),
     dcc.Interval(id="interval", interval=60_000, n_intervals=0),
     dcc.Store(id="stored-data"),
     dcc.Download(id="download-data"),
@@ -1197,199 +1653,66 @@ app.layout = html.Div([
     # Fixed Top Bar
     html.Nav([
         html.Div([
-            html.Span("PRAKASH", style={"fontWeight": "800", "fontSize": "1.75rem", "marginRight": "10px"}),
-            html.Span("AMB 2.0 T³", className="glowing-badge", style={"fontSize": "0.9rem"})
-        ], className="top-bar-title"),
-        html.Img(src="/images.png", style={"height": "70px", "mixBlendMode": "multiply"})
-    ], className="top-bar"),
+            html.Div([
+                html.Img(src="/main_logo.svg", style={"height": "40px", "marginRight": "15px"}),
+                html.Div([
+                    html.Span("PRAKASH", style={"fontWeight": "800", "fontSize": "1.75rem", "marginRight": "10px"}),
+                    html.Span("AMB 2.0 T³", className="glowing-badge", style={"fontSize": "0.9rem"})
+                ], style={"display": "flex", "alignItems": "center"}),
+            ], className="top-bar-title", style={"display": "flex", "alignItems": "center"}),
+            
+            # Sub-header Buttons
+            html.Div([
+                dcc.Link("Test", href="/", className="nav-btn nav-btn-track"),
+                dcc.Link("Treat", href="/treat", className="nav-btn nav-btn-treat"),
+                dcc.Link("Track", href="/track", className="nav-btn nav-btn-test")
+            ], className="nav-buttons", style={"marginTop": "5px"})
+        ], style={"display": "flex", "flexDirection": "column"}),
+        
+        html.Div([
+            html.Img(src="/images.png", style={"height": "70px", "mixBlendMode": "multiply"}),
+            html.Img(src="/government-of-karnataka.webp", style={"height": "70px", "marginLeft": "-20px"})
+        ], style={"display": "flex", "alignItems": "center"})
+    ], className="top-bar", style={"height": "120px"}), # Increased height to accommodate buttons
 
     # Mobile Header (Only visible on mobile)
     html.Div([
         dbc.Button(html.I(className="fas fa-bars"), id="btn-toggle", className="toggle-button"),
+        html.Img(src="/main_logo.svg", style={"height": "30px", "marginLeft": "10px"}),
         html.Div([
             html.Span("PRAKASH", style={"fontWeight": "800", "fontSize": "1.1rem", "marginRight": "5px"}),
             html.Span("AMB 2.0 T³", className="glowing-badge", style={"fontSize": "0.65rem", "padding": "1px 6px"})
         ], style={"display": "flex", "alignItems": "center", "marginLeft": "10px", "flex": "1"}),
-        html.Img(src="/images.png", style={"height": "45px", "mixBlendMode": "multiply", "marginLeft": "auto"})
+        html.Div([
+            html.Img(src="/images.png", style={"height": "40px", "mixBlendMode": "multiply"}),
+            html.Img(src="/government-of-karnataka.webp", style={"height": "40px", "marginLeft": "-10px"})
+        ], style={"display": "flex", "alignItems": "center", "marginLeft": "auto"})
     ], className="mobile-nav"),
 
-    html.Div([
-        # Sidebar Header (Context Label)
-        html.Div([
-            html.P("Real-time Anaemia Monitoring Dashboard", 
-                   style={"fontSize": "0.75rem", "fontWeight": "700", "color": "#000000", "margin": "0", "letterSpacing": "0.05em", "textTransform": "uppercase"}),
-            html.P("Koppal, Karnataka", 
-                   style={"fontSize": "0.7rem", "color": "#000000", "margin": "2px 0 0 0"})
-        ], style={"padding": "0 0 20px 0", "marginBottom": "10px", "borderBottom": "1px solid #f1f5f9"}),
-        
-        html.Div([
-            # Location Selection (Always Visible)
-            html.Div([
-                html.Label("Location Selection", className="sidebar-label"),
-                dcc.Dropdown(id="location-dropdown", options=[], multi=True, value=[], placeholder="All Locations"),
-            ], className="filter-group"),
-            
-            # Filter Groups (Reverted to flat layout)
-            html.Div([
-                html.Label("Beneficiary Type", className="sidebar-label"),
-                dcc.Dropdown(id="benificiery-dropdown", options=[], multi=True, value=[], placeholder="All Beneficiaries"),
-            ], className="filter-group"),
-            
-            html.Div([
-                html.Label("Anemia Status", className="sidebar-label"),
-                dcc.Dropdown(id="anemia-dropdown", options=[{"label": x.capitalize(), "value": x} for x in anemia_list], multi=True, value=[], placeholder="All Categories"),
-            ], className="filter-group"),
-
-            dbc.Button("Clear All Filters", 
-                       id="btn-clear", color="secondary", outline=True, size="sm", 
-                       className="w-100 mb-4", style={"fontSize": "0.75rem", "borderRadius": "8px"}),
-
-            html.Div([
-                html.Label("Management Tools", className="sidebar-label"),
-                dbc.ButtonGroup([
-                    dbc.Button([html.I(className="fas fa-file-excel me-2"), "Excel"], id="btn-excel", color="success", outline=True, size="sm", style={"fontSize": "0.7rem"}),
-                    dbc.Button([html.I(className="fas fa-file-csv me-2"), "CSV"], id="btn-csv", color="primary", outline=True, size="sm", style={"fontSize": "0.7rem"}),
-                ], className="w-100"),
-            ], className="filter-group"),
-
-            html.Div([
-                html.Label("Urgent Follow-up", className="sidebar-label", style={"color": "#ef4444"}),
-                html.Div(id="urgent-alerts-list", className="urgent-list"),
-            ], className="filter-group", id="urgent-section"),
-        ], style={"flex": "1"}),
-        
-        html.Div([
-            html.Div([
-                html.Div(className="status-dot"),
-                html.Span("Live Data Connection")
-            ], className="status-badge")
-        ], style={"marginTop": "auto", "padding": "10px 0"})
-    ], id="sidebar", className="sidebar"),
-    
-    # Main Content
-    html.Div([
-        # Main Dashboard Grid
-        dbc.Row([
-            # KPI Section (Moved up to top row since branding is now in fixed top bar)
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-users kpi-icon"), html.P("Total Enrolled", className="kpi-label")], className="kpi-header"),
-                html.H3(id="total", className="kpi-value")
-            ], className="kpi-card"), xs=12, sm=6, md=4, lg=True),
-
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-chart-line kpi-icon", style={"color": "#6366f1"}), html.P("Prevalence of Anemia", className="kpi-label")], className="kpi-header"),
-                html.H3(id="prevalence-val", className="kpi-value")
-            ], className="kpi-card"), xs=6, sm=4, md=True),
-            
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-check-circle kpi-icon", style={"color": "#10b981"}), html.P("Normal", className="kpi-label")], className="kpi-header"),
-                html.H3(id="normal-count", className="kpi-value")
-            ], className="kpi-card"), xs=6, sm=4, md=True),
-            
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-info-circle kpi-icon", style={"color": "#f59e0b"}), html.P("Mild", className="kpi-label")], className="kpi-header"),
-                html.H3(id="mild-count", className="kpi-value")
-            ], className="kpi-card"), xs=6, sm=4, md=True),
-            
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-exclamation-circle kpi-icon", style={"color": "#f97316"}), html.P("Moderate", className="kpi-label")], className="kpi-header"),
-                html.H3(id="moderate-count", className="kpi-value")
-            ], className="kpi-card"), xs=6, sm=4, md=True),
-            
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-exclamation-triangle kpi-icon", style={"color": "#ef4444"}), html.P("Severe", className="kpi-label")], className="kpi-header"),
-                html.H3(id="severe-count", className="kpi-value")
-            ], className="kpi-card"), xs=6, sm=4, md=True),
-            
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-droplet kpi-icon", style={"color": "#991b1b"}), html.P("Avg Hb (g/dL)", className="kpi-label")], className="kpi-header"),
-                html.H3(id="avg-hgb", className="kpi-value")
-            ], className="kpi-card"), xs=6, sm=4, md=True),
-            
-            dbc.Col(html.Div([
-                html.Div([html.I(className="fas fa-utensils kpi-icon", style={"color": "#8b5cf6"}), html.P("Dietary", className="kpi-label")], className="kpi-header"),
-                html.H3(id="diet-count", className="kpi-value")
-            ], className="kpi-card"), xs=6, sm=4, md=True),
-        ], className="mb-4 g-3"),
-        
-        # Grid Section
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H5("Geospatial Distribution", className="graph-title"),
-                    dcc.Loading(dcc.Graph(id="map", config={"responsive": True, "displayModeBar": False}, style=MAP_CARD_STYLE), type="default"),
-                ], className="graph-card")
-            ], xs=12, xl=8),
-            
-            dbc.Col([
-                html.Div([
-                    html.H5("Case Classification", className="graph-title"),
-                    dcc.Loading(dcc.Graph(id="anemia-pie", config={"responsive": True, "displayModeBar": False}, style={"height": "265px"}), type="default"),
-                ], className="graph-card", style={"marginBottom": "24px"}),
-                
-                html.Div([
-                    html.H5("Beneficiary Distribution", className="graph-title"),
-                    dcc.Loading(dcc.Graph(id="benificiery-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "265px"}), type="default"),
-                ], className="graph-card")
-            ], xs=12, xl=4)
-        ], className="mb-4 g-3"),
-        
-        # Comparison Row
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H5("Nutritional Status Analysis (BMI Distribution)", className="graph-title"),
-                    dcc.Loading(dcc.Graph(id="bmi-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
-                ], className="graph-card")
-            ], xs=12, lg=6),
-            
-            dbc.Col([
-                html.Div([
-                    html.H5("PSU-wise Hemoglobin Analysis (Mean & SD)", className="graph-title"),
-                    dcc.Loading(dcc.Graph(id="hgb-stats-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
-                ], className="graph-card")
-            ], xs=12, lg=6),
-        ], className="mb-4 g-3"),
-        
-        # Geospatial/Demographic Row (Renamed for clarity as Anemia Village is here now)
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H5("PSU-wise Anemia Classification", className="graph-title"),
-                    dcc.Loading(dcc.Graph(id="anemia-village-bar", config={"responsive": True, "displayModeBar": False}, style={"height": "450px"}), type="default"),
-                ], className="graph-card")
-            ], xs=12),
-        ], className="mb-4 g-3"),
-
-        # Table Section
-        html.Div([
-            html.H5("Detailed Beneficiary Records", className="graph-title"),
-            dcc.Loading(dash_table.DataTable(
-                id="table", page_size=15, filter_action="native", sort_action="native",
-                style_table={"overflowX": "auto", "minWidth": "100%"}, 
-                style_cell={"padding": "12px", "textAlign": "left", "fontFamily": "-apple-system, BlinkMacSystemFont, sans-serif", "fontSize": "0.875rem", "minWidth": "150px"},
-                style_header={"fontWeight": "600", "backgroundColor": "#f8fafc", "color": "#475569", "borderBottom": "2px solid #e2e8f0"},
-                fixed_rows={'headers': True},
-                style_data_conditional=[
-                    {'if': {'filter_query': '{anemia_category} = "Normal"'}, 'backgroundColor': '#f0fdf4', 'color': '#166534'},
-                    {'if': {'filter_query': '{anemia_category} = "Mild"'}, 'backgroundColor': '#fffbeb', 'color': '#92400e'},
-                    {'if': {'filter_query': '{anemia_category} = "Moderate"'}, 'backgroundColor': '#fff7ed', 'color': '#9a3412'},
-                    {'if': {'filter_query': '{anemia_category} = "Severe"'}, 'backgroundColor': '#fef2f2', 'color': '#991b1b'},
-                    {'if': {'filter_query': '{anemia_category} = "Incomplete"'}, 'backgroundColor': '#f8fafc', 'color': '#475569'},
-                ]
-            ), type="default")
-        ], className="graph-card"),
-        
-        # Footer Section
-        html.Footer([
-            html.Hr(style={"margin": "40px 0 20px 0", "opacity": "0.1"}),
-            html.Div([
-                html.P("Copyright © 2026 ICMR CAR MEDTECH LAB | St Johns's Research Institute, Bangalore",
-                       style={"fontSize": "0.75rem", "color": "#64748b", "textAlign": "center", "marginBottom": "20px"})
-            ], className="footer-content")
-        ], className="dashboard-footer")
-    ], id="main-content", className="main-content")
+    # Page Content Container
+    html.Div(id="page-content")
 ], id="main-container")
+
+@app.callback(
+    Output("page-content", "children"),
+    Input("url", "pathname")
+)
+def display_page(pathname):
+    if pathname == "/track":
+        return html.Div([
+            # Phase Marker
+            html.Div([
+                html.Span([html.I(className="fas fa-tag me-2"), "Baseline 1"], className="glowing-badge", style={"fontSize": "0.75rem", "padding": "4px 12px"})
+            ], style={"textAlign": "left", "marginBottom": "10px"}),
+            html.H1("Track Page", style={"textAlign": "center", "marginTop": "200px"}),
+            html.P("This page is under development and will be available soon", style={"textAlign": "center"}),
+            get_footer()
+        ], style={"padding": "40px"})
+    elif pathname == "/treat":
+        return get_treat_layout()
+    else:
+        # Default to the Main Dashboard (Now under 'Test' branding in Nav)
+        return get_dashboard_layout()
 
 @app.callback(
     [Output("sidebar", "className"), Output("main-content", "className")],
@@ -1444,18 +1767,19 @@ def refresh_data(_):
         Input("anemia-dropdown", "value"), Input("interval", "n_intervals"),
         Input("map", "clickData"), Input("anemia-pie", "clickData"),
         Input("benificiery-bar", "clickData"), Input("btn-clear", "n_clicks"),
+        Input("url", "pathname")
     ]
 )
-def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear):
+def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear, pathname):
     try:
-        return internal_update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear)
+        return internal_update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear, pathname)
     except Exception as e:
         import traceback
         print(f"CRITICAL ERROR in update_dashboard: {str(e)}")
         print(traceback.format_exc())
         return [0]*8 + [go.Figure()]*6 + [[]]*9
 
-def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear):
+def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear, pathname):
     if not stored_dict or "records" not in stored_dict:
         # Return 22 elements to match the number of outputs
         return [0]*8 + [go.Figure()]*6 + [[]]*9
@@ -1560,12 +1884,13 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
     mild = (df["anemia_category"] == "mild").sum()
     moderate = (df["anemia_category"] == "moderate").sum()
     severe = (df["anemia_category"] == "severe").sum()
-    # Use Diet1 column as indicated by the user
-    diet_col = "Diet1" if "Diet1" in df.columns else ("Diet" if "Diet" in df.columns else None)
-    if diet_col:
-        # Check specifically for "yes" (case-insensitive) as per user instruction
-        # Blank/NaN values are considered "no"
-        diet_yes = (df[diet_col].astype(str).str.strip().str.lower() == "yes").sum()
+    # Diet analytics: Track Diet 1 and Diet 2 (KPI specifically uses Diet 2/Diet1 as per requirement)
+    # Check specifically for "yes" (case-insensitive)
+    # Blank/NaN values are considered "no"
+    if "Diet 2" in df.columns:
+        diet_yes = (df["Diet 2"].astype(str).str.strip().str.lower() == "yes").sum()
+    elif "Diet 1" in df.columns:
+        diet_yes = (df["Diet 1"].astype(str).str.strip().str.lower() == "yes").sum()
     else:
         diet_yes = 0
     avg_hgb = round(df["HGB"].mean(), 2) if not df.empty else 0
@@ -1640,11 +1965,14 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
 
     # Removed is_full_update check to ensure dashboard always reflects current filter state
 
-    map_fig = create_map(df)
+    if pathname == "/treat":
+        map_fig = create_treat_map(df)
+    else:
+        map_fig = create_map(df)
     
     # Age-wise breakdown for Benificiery Hover
     def get_age_bucket(age):
-        if pd.isna(age): return "Unknown"
+        if pd.isna(age): return "Missing"
         if age < 1: return f"{int(round(age*12))} Months"
         if age < 5: return "1-4 Years"
         if age <=9: return "5-9 Years"
@@ -1698,7 +2026,8 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
         yaxis=dict(title="Count", automargin=True, showgrid=True, gridcolor="#f1f5f9", tickfont=dict(color="#64748b")),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
-        height=360 
+        height=360,
+        uirevision=True # Preserve selection/zoom state
     )
 
     # Anemia pie
@@ -1718,7 +2047,8 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
         legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5, font=dict(size=10, color="#64748b")),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
-        height=250
+        height=250,
+        uirevision=True # Preserve slice selection state
     )
     # Give the pie more room
     anemia_pie.update_traces(domain=dict(y=[0.2, 1.0]))
@@ -1775,7 +2105,8 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
         height=450,
-        bargap=0.2
+        bargap=0.2,
+        uirevision=True # Preserve zoom/pan state
     )
 
     # --- Village-wise Bar Chart (Mean & SD STATS) ---
@@ -1851,41 +2182,86 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
         hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
         height=450,
         showlegend=False,
-        bargap=0.2
+        bargap=0.2,
+        uirevision=True # Preserve zoom/pan state
     )
     
-    # BMI Distribution Bar Chart
-    bmi_counts = df["bmi_category"].value_counts().reindex(["Underweight", "Normal", "Overweight", "Obese", "Unknown"], fill_value=0)
-    
+    # BMI Distribution Bar Chart (Stacked by Beneficiary)
+    if "Benificiery" in df.columns and "bmi_category" in df.columns:
+        bmi_ben_counts = df.groupby(["Benificiery", "bmi_category"]).size().unstack(fill_value=0)
+    else:
+        bmi_ben_counts = pd.DataFrame()
+
     bmi_colors = {
-        "Underweight": "#ef4444", # Red for deficiency
-        "Normal": "#10b981",      # Green
-        "Overweight": "#f59e0b",   # Amber
-        "Obese": "#991b1b",        # Dark Red
-        "Unknown": "#94a3b8"       # Gray
+        "Wasted": "#ef4444",
+        "Thinness": "#ef4444",
+        "Underweight": "#ef4444",
+        "Normal": "#10b981",
+        "Overweight": "#f59e0b",
+        "Obese": "#b91c1c",
+        "Pregnancy": "#8b5cf6",
+        "Missing": "#94a3b8"
     }
     
-    bmi_fig = go.Figure(go.Bar(
-        x=bmi_counts.index,
-        y=bmi_counts.values,
-        marker=dict(
-            color=[bmi_colors.get(cat, "#cbd5e1") for cat in bmi_counts.index],
-            line=dict(color="#1e293b", width=1.5)
-        ),
-        text=bmi_counts.values,
-        textposition="auto",
-        name="Beneficiaries",
-        opacity=0.9
-    ))
+    # Simplified stacking order for cleaner report
+    stack_order = ["Wasted", "Thinness", "Underweight", "Normal", "Overweight", "Obese", "Pregnancy", "Missing"]
+            
+    bmi_fig = go.Figure()
     
+    if not bmi_ben_counts.empty:
+        # Pre-calculate summaries for each Beneficiary
+        ben_summaries = {}
+        for ben in bmi_ben_counts.index:
+            row = bmi_ben_counts.loc[ben]
+            parts = []
+            # Use stack_order for consistent ordering in tooltip
+            for c in stack_order:
+                if c in row and row[c] > 0:
+                    parts.append(f"{c}: <b>{row[c]}</b>")
+            # Also add extra categories not in stack_order
+            for c in row.index:
+                if c not in stack_order and row[c] > 0:
+                    parts.append(f"{c}: <b>{row[c]}</b>")
+            ben_summaries[ben] = "<br>".join(parts)
+
+        # Map summaries to the x-axis order
+        custom_data_list = [ben_summaries.get(b, "") for b in bmi_ben_counts.index]
+
+        # Ensure all columns exist for consistent coloring even if count is 0
+        present_cats = [c for c in stack_order if c in bmi_ben_counts.columns]
+        # Also add any unexpected categories found in data
+        extra_cats = [c for c in bmi_ben_counts.columns if c not in stack_order]
+        final_order = present_cats + extra_cats
+        
+        for cat in final_order:
+            if cat in bmi_ben_counts:
+                bmi_fig.add_trace(go.Bar(
+                    name=cat,
+                    x=bmi_ben_counts.index,
+                    y=bmi_ben_counts[cat],
+                    marker=dict(
+                        color=bmi_colors.get(cat, "#cbd5e1"),
+                        line=dict(color="white", width=1)
+                    ),
+                    customdata=custom_data_list,
+                    # Hover: Show current segment + Full Summary
+                    hovertemplate="<b>%{x}</b><br>" + cat + ": <b>%{y}</b><br><br><b>Total Breakdown:</b><br>%{customdata}<extra></extra>"
+                ))
+    else:
+        # Fallback empty chart 
+        bmi_fig.add_annotation(text="No Data", showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)
+
     bmi_fig.update_layout(
+        barmode="stack",
         margin=dict(t=30, b=50, l=50, r=20),
-        xaxis=dict(title="BMI Category (WHO Guidelines)", showgrid=False, tickfont=dict(color="#64748b")),
+        xaxis=dict(title="Beneficiary Type", showgrid=False, tickfont=dict(color="#64748b")),
         yaxis=dict(title="Count", showgrid=True, gridcolor="#f1f5f9", tickfont=dict(color="#64748b")),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         hoverlabel=dict(bgcolor="white", font_size=13, font_family="-apple-system, BlinkMacSystemFont, sans-serif", font_color="#0f172a", bordercolor="#cbd5e1"),
         height=450,
-        bargap=0.4
+        bargap=0.3,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5, font=dict(size=10, color="#475569")),
+        uirevision=True # Preserve zoom/pan state
     )
     # ----------------------------------------------
 
@@ -1896,7 +2272,7 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
         # Generate WP link for sidebar [Grouped Version]
         contact = str(row.get("Aasha_Contact", ""))
         asha_name = row.get("Asha_Worker")
-        p_id = str(row.get("ID", "Unknown"))
+        p_id = str(row.get("ID", "Missing"))
         
         wa_btn = None
         if contact != "" and contact != "nan" and asha_name in asha_summaries:
@@ -1912,7 +2288,7 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
                 html.Span(f" | Hb: {row.get('HGB', 'N/A')}", style={"color": "#ef4444"}),
             ], style={"display": "flex", "alignItems": "center", "justifyContent": "space-between"}),
             html.Div([
-                html.P(f"{row.get('PSU Name', 'Unknown')}", style={"margin": 0, "fontSize": "0.65rem", "color": "#64748b"}),
+                html.P(f"{row.get('PSU Name', 'Missing')}", style={"margin": 0, "fontSize": "0.65rem", "color": "#64748b"}),
                 wa_btn if wa_btn else html.Span()
             ], style={"display": "flex", "alignItems": "center", "justifyContent": "space-between"})
         ], className="urgent-item"))
@@ -1955,14 +2331,20 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
 )
 def export_data(n_excel, n_csv, stored_dict, location, benif, anemia):
     try:
-        if not callback_context.triggered:
+        ctx = callback_context
+        if not ctx.triggered:
+            return no_update
+            
+        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        # Robust verification: Only proceed if a button was actually clicked (n_clicks > 0)
+        if trigger == "btn-excel" and (n_excel is None or n_excel == 0):
+            return no_update
+        if trigger == "btn-csv" and (n_csv is None or n_csv == 0):
             return no_update
             
         if not stored_dict or "records" not in stored_dict:
-            print("DEBUG: Export failed - No data in stored_dict")
             return no_update
-        
-        print(f"DEBUG: Export triggered. Filters - Loc: {location}, Benif: {benif}, Anemia: {anemia}")
         
         df = pd.DataFrame(stored_dict["records"])
         
@@ -1986,14 +2368,11 @@ def export_data(n_excel, n_csv, stored_dict, location, benif, anemia):
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%d/%m/%Y').fillna("")
 
-        ctx = callback_context
-        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
         print(f"DEBUG: Exporting {len(df)} records. Trigger: {trigger}")
 
         if trigger == "btn-csv":
             return dcc.send_data_frame(df.to_csv, "prakash_data_export.csv", index=False)
         else:
-            # Excel requires openpyxl
             return dcc.send_data_frame(df.to_excel, "prakash_data_export.xlsx", index=False, engine="openpyxl")
     except Exception as e:
         print(f"CRITICAL ERROR in export_data: {e}")
