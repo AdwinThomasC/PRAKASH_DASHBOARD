@@ -1131,7 +1131,7 @@ def area_coordinates():
         'Bannikoppa': {'lat': 15.3877, 'lon': 75.9420},
         'Tadkal': {'lat': 15.3688, 'lon': 75.9812},
         'Hulegudda': {'lat': 15.6235, 'lon': 76.1146},
-        'Konasagar': {'lat': 15.6916, 'lon': 76.1030},
+        'Konasagara': {'lat': 15.6916, 'lon': 76.1030},
         'Kawalbodur': {'lat': 15.8318, 'lon': 76.1871},
         'Balutagi': {'lat': 15.87338865573784, 'lon': 76.25665534853232},
         'HireGonnagar': {'lat': 15.8092, 'lon': 75.9539},
@@ -2380,4 +2380,5 @@ def export_data(n_excel, n_csv, stored_dict, location, benif, anemia):
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8060)
+
 
