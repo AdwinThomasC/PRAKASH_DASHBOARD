@@ -507,16 +507,25 @@ body {
     border: 1px solid transparent;
 }
 
-.nav-btn-test { color: #4f46e5; border-color: #e2e8f0; background: #ffffff; }
-.nav-btn-treat { color: #0d9488; border-color: #ccfbf1; background: #f0fdfa; }
-.nav-btn-track { color: #ffffff; background: #4f46e5; }
-
-.nav-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+.nav-btn-standard { 
+    color: #64748b; 
+    border: 1px solid #e2e8f0; 
+    background: #ffffff; 
 }
 
-.nav-btn-track:hover { background: #4338ca; }
+.nav-btn-standard:hover {
+    color: #4f46e5;
+    border-color: #cbd5e1;
+    background-color: #f8fafc;
+}
+
+.nav-btn.active {
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+    transform: translateY(-2px);
+    border: 2px solid #4f46e5 !important;
+    background-color: #4f46e5 !important;
+    color: #ffffff !important;
+}
 
 /* Urgent Alerts Styling */
 .urgent-list {
@@ -1424,7 +1433,7 @@ def get_treat_layout():
 
             html.Div([
                 html.H4("Geospatial High-Risk Distribution", style={"marginBottom": "20px", "fontWeight": "700"}),
-                html.P("Hover over markers to see assigned Asha Workers and patient breakdown.", style={"color": "#64748b", "fontSize": "0.9rem"}),
+                html.P("Hover over markers to see assigned Asha Workers and beneficiary breakdown.", style={"color": "#64748b", "fontSize": "0.9rem"}),
                 dcc.Graph(id="map", config={"responsive": True}, style=MAP_CARD_STYLE),
             ], className="graph-card", style={"padding": "30px", "marginBottom": "24px"}),
             
@@ -1444,6 +1453,35 @@ def get_treat_layout():
                 dbc.Col(dcc.Graph(id="hgb-stats-bar", style={"display": "none"}), width=4),
                 dbc.Col(dcc.Graph(id="anemia-village-bar", style={"display": "none"}), width=4),
             ]),
+
+            # Anemia Tables Section
+            html.Div([
+                html.Div([
+                    html.H4([html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#ef4444"}), "Severe Anemia Beneficiaries"], 
+                           style={"marginBottom": "15px", "fontWeight": "700", "color": "#991b1b"}),
+                    dash_table.DataTable(
+                        id="severe-table",
+                        style_table={"overflowX": "auto", "borderRadius": "12px", "overflow": "hidden", "border": "1px solid #fee2e2"},
+                        style_cell={"padding": "12px", "textAlign": "left", "fontFamily": "var(--font-family)", "fontSize": "0.85rem"},
+                        style_header={"backgroundColor": "#fef2f2", "fontWeight": "700", "color": "#991b1b", "borderBottom": "2px solid #fecaca"},
+                        style_data={"backgroundColor": "#ffffff"},
+                        page_size=10
+                    )
+                ], className="graph-card", style={"marginBottom": "30px", "borderLeft": "5px solid #ef4444"}),
+
+                html.Div([
+                    html.H4([html.I(className="fas fa-exclamation-circle me-2", style={"color": "#f97316"}), "Moderate Anemia Beneficiaries"], 
+                           style={"marginBottom": "15px", "fontWeight": "700", "color": "#9a3412"}),
+                    dash_table.DataTable(
+                        id="moderate-table",
+                        style_table={"overflowX": "auto", "borderRadius": "12px", "overflow": "hidden", "border": "1px solid #ffedd5"},
+                        style_cell={"padding": "12px", "textAlign": "left", "fontFamily": "var(--font-family)", "fontSize": "0.85rem"},
+                        style_header={"backgroundColor": "#fff7ed", "fontWeight": "700", "color": "#9a3412", "borderBottom": "2px solid #fed7aa"},
+                        style_data={"backgroundColor": "#ffffff"},
+                        page_size=10
+                    )
+                ], className="graph-card", style={"marginBottom": "30px", "borderLeft": "5px solid #f97316"})
+            ], style={"marginTop": "20px"}),
 
             html.Div([
                 html.H5("Detailed Records", className="graph-title"),
@@ -1510,6 +1548,8 @@ def get_dashboard_layout():
 
                 # Placeholder for urgent alerts to satisfy callback output in multi-page environment
                 html.Div(id="urgent-alerts-list", style={"display": "none"}),
+                html.Div(id="severe-table", style={"display": "none"}),
+                html.Div(id="moderate-table", style={"display": "none"}),
             ], style={"flex": "1"}),
             
             html.Div([
@@ -1662,11 +1702,7 @@ app.layout = html.Div([
             ], className="top-bar-title", style={"display": "flex", "alignItems": "center"}),
             
             # Sub-header Buttons
-            html.Div([
-                dcc.Link("Test", href="/", className="nav-btn nav-btn-track"),
-                dcc.Link("Treat", href="/treat", className="nav-btn nav-btn-treat"),
-                dcc.Link("Track", href="/track", className="nav-btn nav-btn-test")
-            ], className="nav-buttons", style={"marginTop": "5px"})
+            html.Div(id="nav-buttons-container", className="nav-buttons", style={"marginTop": "5px"})
         ], style={"display": "flex", "flexDirection": "column"}),
         
         html.Div([
@@ -1706,6 +1742,20 @@ def display_page(pathname):
             ], style={"textAlign": "left", "marginBottom": "10px"}),
             html.H1("Track Page", style={"textAlign": "center", "marginTop": "200px"}),
             html.P("This page is under development and will be available soon", style={"textAlign": "center"}),
+            # Hidden placeholders for shared callbacks
+            html.Div([
+                html.Div(id="total"), html.Div(id="normal-count"), html.Div(id="moderate-count"), 
+                html.Div(id="severe-count"), html.Div(id="mild-count"), html.Div(id="avg-hgb"), 
+                html.Div(id="diet-count"), html.Div(id="prevalence-val"),
+                dcc.Graph(id="map"), dcc.Graph(id="benificiery-bar"), dcc.Graph(id="anemia-pie"),
+                dcc.Graph(id="anemia-village-bar"), dcc.Graph(id="hgb-stats-bar"), dcc.Graph(id="bmi-bar"),
+                dash_table.DataTable(id="table"),
+                dcc.Dropdown(id="location-dropdown"), dcc.Dropdown(id="benificiery-dropdown"), 
+                dcc.Dropdown(id="anemia-dropdown"),
+                html.Div(id="urgent-alerts-list"),
+                html.Div(id="severe-table"), html.Div(id="moderate-table"),
+                dbc.Button(id="btn-clear"),
+            ], style={"display": "none"}),
             get_footer()
         ], style={"padding": "40px"})
     elif pathname == "/treat":
@@ -1713,6 +1763,33 @@ def display_page(pathname):
     else:
         # Default to the Main Dashboard (Now under 'Test' branding in Nav)
         return get_dashboard_layout()
+
+@app.callback(
+    Output("nav-buttons-container", "children"),
+    Input("url", "pathname")
+)
+def update_nav_buttons(pathname):
+    # Define buttons and their target routes
+    buttons = [
+        {"name": "Test", "href": "/"},
+        {"name": "Treat", "href": "/treat"},
+        {"name": "Track", "href": "/track"}
+    ]
+    
+    nav_links = []
+    for btn in buttons:
+        is_active = pathname == btn["href"]
+        # Special case for root
+        if btn["href"] == "/" and pathname not in ["/treat", "/track"]:
+            is_active = True
+            
+        full_class = "nav-btn nav-btn-standard"
+        if is_active:
+            full_class += " active"
+            
+        nav_links.append(dcc.Link(btn["name"], href=btn["href"], className=full_class))
+        
+    return nav_links
 
 @app.callback(
     [Output("sidebar", "className"), Output("main-content", "className")],
@@ -1760,6 +1837,8 @@ def refresh_data(_):
         Output("location-dropdown", "value"),
         Output("benificiery-dropdown", "value"), Output("anemia-dropdown", "value"),
         Output("urgent-alerts-list", "children"),
+        Output("severe-table", "data"), Output("severe-table", "columns"),
+        Output("moderate-table", "data"), Output("moderate-table", "columns"),
     ],
     [
         Input("stored-data", "data"), Input("location-dropdown", "value"),
@@ -1777,12 +1856,12 @@ def update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, ma
         import traceback
         print(f"CRITICAL ERROR in update_dashboard: {str(e)}")
         print(traceback.format_exc())
-        return [0]*8 + [go.Figure()]*6 + [[]]*9
+        return [0]*8 + [go.Figure()]*6 + [[]]*9 + [[]]*4
 
 def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_intervals, map_click, pie_click, bar_click, n_clear, pathname):
     if not stored_dict or "records" not in stored_dict:
-        # Return 22 elements to match the number of outputs
-        return [0]*8 + [go.Figure()]*6 + [[]]*9
+        # Return 26 elements to match the number of outputs
+        return [0]*8 + [go.Figure()]*6 + [[]]*9 + [[]]*4
     
     records = stored_dict["records"]
     status_msg = stored_dict["status"]
@@ -1790,8 +1869,8 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
     last_upd = stored_dict.get("last_updated", "")
 
     if not records and is_error:
-        # Return 22 elements
-        return [0]*8 + [go.Figure()]*6 + [[]]*9
+        # Return 26 elements
+        return [0]*8 + [go.Figure()]*6 + [[]]*9 + [[]]*4
 
     df_full = pd.DataFrame(records)
     
@@ -2316,7 +2395,37 @@ def internal_update_dashboard(stored_dict, location, benificiery, anemia, n_inte
 
     print(f">>> RETURNING LOCATION: {location}")
     print(f">>> CALLBACK END: {triggered_id}\n")
-    return (total, normal_kpi, moderate_kpi, severe_kpi, mild_kpi, avg_hgb, diet_yes, prevalence_str, map_fig, benif_bar, anemia_pie, anemia_village_bar, hgb_stats_fig, bmi_fig, df_table.to_dict("records"), table_cols, loc_opts, benif_opts, anemia_opts, location, benificiery, anemia, urgent_list)
+
+    # --- Treat Page Specific Tables ---
+    treat_cols = [
+        {"name": "Subject ID", "id": "ID"},
+        {"name": "Village", "id": "PSU Name"},
+        {"name": "Name", "id": "Name"},
+        {"name": "Household Name", "id": "Household Name"},
+        {"name": "HB", "id": "HGB"},
+        {"name": "Beneficiary", "id": "Benificiery"},
+        {"name": "Asha Worker", "id": "Asha_Worker"},
+        {"name": "Notify Asha", "id": "whatsapp", "presentation": "markdown"}
+    ]
+
+    severe_data = []
+    moderate_data = []
+
+    if pathname == "/treat":
+        # We use the filtered 'df' to populate these tables
+        df_severe = df[df["anemia_category"].str.lower() == "severe"].copy()
+        df_moderate = df[df["anemia_category"].str.lower() == "moderate"].copy()
+
+        # Generate WhatsApp links for these specific tables if not already done correctly
+        # The 'generate_wa_link' already exists and was applied to df_table, but df is a separate copy
+        # Let's re-apply it safely
+        df_severe["whatsapp"] = df_severe.apply(generate_wa_link, axis=1)
+        df_moderate["whatsapp"] = df_moderate.apply(generate_wa_link, axis=1)
+
+        severe_data = df_severe.to_dict("records")
+        moderate_data = df_moderate.to_dict("records")
+
+    return (total, normal_kpi, moderate_kpi, severe_kpi, mild_kpi, avg_hgb, diet_yes, prevalence_str, map_fig, benif_bar, anemia_pie, anemia_village_bar, hgb_stats_fig, bmi_fig, df_table.to_dict("records"), table_cols, loc_opts, benif_opts, anemia_opts, location, benificiery, anemia, urgent_list, severe_data, treat_cols, moderate_data, treat_cols)
 
 
 # =========================
@@ -2380,5 +2489,4 @@ def export_data(n_excel, n_csv, stored_dict, location, benif, anemia):
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8060)
-
 
